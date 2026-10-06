@@ -186,3 +186,47 @@ class GitHubClient:
         response.raise_for_status()
 
         return response.json()
+
+def create_pull_request(
+    self,
+    owner: str,
+    repository: str,
+    *,
+    title: str,
+    body: str,
+    head: str,
+    base: str = "main",
+) -> GitHubPullRequest:
+    response = self._client.post(
+        f"/repos/{owner}/{repository}/pulls",
+        json={
+            "title": title,
+            "body": body,
+            "head": head,
+            "base": base,
+        },
+    )
+
+    response.raise_for_status()
+
+    return GitHubPullRequest.model_validate(
+        response.json()
+    )
+
+
+def merge_pull_request(
+    self,
+    owner: str,
+    repository: str,
+    pull_number: int,
+) -> dict:
+    response = self._client.put(
+        f"/repos/{owner}/{repository}/pulls/{pull_number}/merge",
+        json={
+            "merge_method": "squash",
+        },
+    )
+
+    response.raise_for_status()
+
+    return response.json()

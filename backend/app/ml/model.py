@@ -1,0 +1,17 @@
+FEATURE_COLUMNS = [
+    "additions",
+    "deletions",
+    "changed_files",
+    "commit_count",
+    "unique_authors",
+    "review_count",
+    "unique_reviewers",
+    "approvals",
+    "change_requests",
+    "check_count",
+    "successful_checks",
+    "failed_checks",
+    "pending_checks",
+    "is_draft",
+    "age_hours",
+]
