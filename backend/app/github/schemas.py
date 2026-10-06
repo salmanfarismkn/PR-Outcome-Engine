@@ -8,6 +8,14 @@ class GitHubOwner(BaseModel):
     login: str
 
 
+class GitHubRepositoryPermissions(BaseModel):
+    admin: bool
+    maintain: bool
+    push: bool
+    triage: bool
+    pull: bool
+
+
 class GitHubRepository(BaseModel):
     id: int
     name: str
@@ -16,6 +24,8 @@ class GitHubRepository(BaseModel):
     description: str | None
     default_branch: str
     owner: GitHubOwner
+    permissions: GitHubRepositoryPermissions | None = None
+
 
 class GitHubUser(BaseModel):
     id: int

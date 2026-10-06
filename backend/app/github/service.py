@@ -5,7 +5,7 @@ from app.repository.schemas import RepositoryImportSummary
 from app.github.client import GitHubClient
 from app.core.config import get_settings
 
-from app.github.schemas import GitHubChangedFile, GitHubPullRequest
+from app.github.schemas import GitHubChangedFile, GitHubPullRequest, GitHubRepository
 from app.pull_request.schemas import PullRequestImportSummary
 from app.github.schemas import GitHubCommit
 from app.github.schemas import GitHubReview
@@ -21,8 +21,13 @@ class GitHubService:
         )
 
     def get_authenticated_user(self):
-        return self._client.get_user()
+        return self._client.get_authenticated_user()
 
+    def get_repository(self, owner: str, repository: str) -> GitHubRepository:
+        return self._client.get_repository(owner, repository)
+
+    def close(self) -> None:
+        self._client.close()
 
     def list_repositories(self, db: Session) -> list[Repository]:
         # Query repositories stored in your DB
@@ -111,4 +116,36 @@ class GitHubService:
             owner=owner,
             repository=repository,
             sha=sha,
+        )
+
+    def create_pull_request(
+        self,
+        owner: str,
+        repository: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str = "main",
+    ) -> GitHubPullRequest:
+        return self._client.create_pull_request(
+            owner=owner,
+            repository=repository,
+            title=title,
+            body=body,
+            head=head,
+            base=base,
+        )
+
+
+    def merge_pull_request(
+        self,
+        owner: str,
+        repository: str,
+        pull_number: int,
+    ) -> dict:
+        return self._client.merge_pull_request(
+            owner=owner,
+            repository=repository,
+            pull_number=pull_number,
         )
