@@ -62,9 +62,50 @@ def report_github_error(action: str, error: Exception) -> SystemExit:
         )
     return SystemExit(f"{action} failed: {error}")
 
-def wait_for_seconds(seconds: int = 5) -> None:
-    print(f"Waiting {seconds}s for webhook processing...")
-    time.sleep(seconds)
+BACKEND_URL = "http://127.0.0.1:8000"
+
+
+def wait_for_pr_status(
+    pull_request_id: int,
+    *,
+    require_merged: bool = False,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: int = 2,
+) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+
+    with httpx.Client(
+        base_url=BACKEND_URL,
+        timeout=10.0,
+    ) as client:
+        while time.monotonic() < deadline:
+            response = client.get(
+                f"/dataset/pr/{pull_request_id}/status"
+            )
+
+            if response.status_code == 404:
+                time.sleep(poll_interval_seconds)
+                continue
+
+            response.raise_for_status()
+            status = response.json()
+
+            if (
+                status["snapshot_created"]
+                and status["outcome_created"]
+                and (
+                    not require_merged
+                    or status["merged"]
+                )
+            ):
+                return status
+
+            time.sleep(poll_interval_seconds)
+
+    raise SystemExit(
+        f"Timed out waiting for PR {pull_request_id} "
+        "to reach the required dataset state."
+    )
     
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -174,7 +215,17 @@ def main() -> None:
                 print("PR created successfully.")
                 print(f"PR number: {pr.number}")
                 print(f"PR title: {pr.title}")
-                wait_for_seconds(5)
+                print("Waiting for PR webhook processing...")
+
+                status = wait_for_pr_status(
+                    pr.number,
+                )
+
+                print(
+                    "PR webhook processed: "
+                    f"snapshot={status['snapshot_created']}, "
+                    f"outcome={status['outcome']}"
+                )              
 
                 print("Merging PR...")
 
@@ -184,11 +235,28 @@ def main() -> None:
                     pull_number=pr.number,
                 )
 
-                print(
-                    f"Merge result: {merge_result.get('merged')}"
+                if not merge_result.get("merged"):
+                    raise SystemExit(
+                        f"GitHub did not merge PR #{pr.number}: "
+                        f"{merge_result}"
+                    )
+
+                print("Merge confirmed by GitHub.")
+
+                print("Waiting for merged webhook processing...")
+
+                status = wait_for_pr_status(
+                    pr.number,
+                    require_merged=True,
                 )
 
-                wait_for_seconds(5)
+                print(
+                    "Dataset example confirmed: "
+                    f"PR #{pr.number}, "
+                    f"outcome={status['outcome']}"
+                )
+
+
                 run_git(
                     repo_path,
                     "checkout",
@@ -205,6 +273,7 @@ def main() -> None:
                 print()
                 print("Dataset PR completed.")
                 print(f"PR #{pr.number} should now be merged.")
+                
             finally:
                 run_git(repo_path, "worktree", "remove", "--force", str(worktree_path))
     finally:
