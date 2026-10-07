@@ -1,6 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timezone
-from time import timezone
+from datetime import datetime, UTC
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, Float, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -114,7 +113,7 @@ class PRFeatureSnapshot(BaseModel):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     
     pull_request: Mapped["PullRequest"] = relationship()

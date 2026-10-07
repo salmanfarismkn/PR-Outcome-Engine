@@ -23,6 +23,7 @@ class PRFeatureService:
         pull_request: PullRequest,
     ) -> PRFeatureSnapshot:
 
+        print("[webhook-debug] snapshot: commits query started", flush=True)
         commits = list(
             db.scalars(
                 select(Commit).where(
@@ -30,7 +31,13 @@ class PRFeatureService:
                 )
             )
         )
+        print(
+            "[webhook-debug] snapshot: commits query returned; "
+            f"count={len(commits)}",
+            flush=True,
+        )
 
+        print("[webhook-debug] snapshot: reviews query started", flush=True)
         reviews = list(
             db.scalars(
                 select(Review).where(
@@ -38,13 +45,24 @@ class PRFeatureService:
                 )
             )
         )
+        print(
+            "[webhook-debug] snapshot: reviews query returned; "
+            f"count={len(reviews)}",
+            flush=True,
+        )
 
+        print("[webhook-debug] snapshot: checks query started", flush=True)
         checks = list(
             db.scalars(
                 select(CheckRun).where(
                     CheckRun.pull_request_id == pull_request.id
                 )
             )
+        )
+        print(
+            "[webhook-debug] snapshot: checks query returned; "
+            f"count={len(checks)}",
+            flush=True,
         )
 
         additions = sum(
@@ -110,6 +128,7 @@ class PRFeatureService:
         changed_files_list = getattr(pull_request, "changed_files", []) or []
         changed_files_count = len(changed_files_list)
 
+        print("[webhook-debug] snapshot: feature values computed", flush=True)
         return PRFeatureSnapshot(
             pull_request_id=pull_request.id,
 
@@ -142,12 +161,18 @@ class PRFeatureService:
     ) -> PRFeatureSnapshotModel:
 
         
+        print("[webhook-debug] snapshot: existing snapshot query started", flush=True)
         existing = db.scalar(
             select(PRFeatureSnapshotModel)
             .where(
                 PRFeatureSnapshotModel.pull_request_id == snapshot.pull_request_id
             )
             .order_by(PRFeatureSnapshotModel.id.desc())
+        )
+        print(
+            "[webhook-debug] snapshot: existing snapshot query returned; "
+            f"found={existing is not None}",
+            flush=True,
         )
 
         if existing is not None:
@@ -167,6 +192,10 @@ class PRFeatureService:
 
             
             if same_state:
+                print(
+                    "[webhook-debug] snapshot: unchanged snapshot; reusing existing",
+                    flush=True,
+                )
                 return existing
 
         
@@ -197,8 +226,12 @@ class PRFeatureService:
         )
 
         db.add(record)
+        print("[webhook-debug] snapshot: insert commit started", flush=True)
         db.commit()
+        print("[webhook-debug] snapshot: insert commit returned", flush=True)
+        print("[webhook-debug] snapshot: refresh started", flush=True)
         db.refresh(record)
+        print("[webhook-debug] snapshot: refresh returned", flush=True)
 
         return record
 
@@ -210,10 +243,13 @@ class PRFeatureService:
         """
         Build a snapshot for the given pull request and save it.
         """
+        print("[webhook-debug] snapshot: build started", flush=True)
         snapshot = self.build_snapshot(
             db=db,
             pull_request=pull_request,
         )
+        print("[webhook-debug] snapshot: build returned", flush=True)
+        print("[webhook-debug] snapshot: save started", flush=True)
         return self.save_snapshot(
             db=db,
             snapshot=snapshot,

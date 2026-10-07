@@ -1,4 +1,5 @@
 import argparse
+import time
 from datetime import datetime, timezone
 import httpx
 import subprocess
@@ -61,7 +62,10 @@ def report_github_error(action: str, error: Exception) -> SystemExit:
         )
     return SystemExit(f"{action} failed: {error}")
 
-
+def wait_for_seconds(seconds: int = 5) -> None:
+    print(f"Waiting {seconds}s for webhook processing...")
+    time.sleep(seconds)
+    
 def main() -> None:
     parser = argparse.ArgumentParser()
 
@@ -170,6 +174,37 @@ def main() -> None:
                 print("PR created successfully.")
                 print(f"PR number: {pr.number}")
                 print(f"PR title: {pr.title}")
+                wait_for_seconds(5)
+
+                print("Merging PR...")
+
+                merge_result = github.merge_pull_request(
+                    owner=args.owner,
+                    repository=args.repo,
+                    pull_number=pr.number,
+                )
+
+                print(
+                    f"Merge result: {merge_result.get('merged')}"
+                )
+
+                wait_for_seconds(5)
+                run_git(
+                    repo_path,
+                    "checkout",
+                    "main",
+                )
+
+                run_git(
+                    repo_path,
+                    "pull",
+                    "origin",
+                    "main",
+                )
+
+                print()
+                print("Dataset PR completed.")
+                print(f"PR #{pr.number} should now be merged.")
             finally:
                 run_git(repo_path, "worktree", "remove", "--force", str(worktree_path))
     finally:

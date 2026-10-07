@@ -16,12 +16,18 @@ class OutcomeEvaluator:
         pull_request: PullRequest,
     ) -> PullRequestOutcome:
 
+        print("[webhook-debug] outcome: existing outcome query started", flush=True)
         outcome = (
             db.query(PullRequestOutcome)
             .filter(
                 PullRequestOutcome.pull_request_id == pull_request.id
             )
             .first()
+        )
+        print(
+            "[webhook-debug] outcome: existing outcome query returned; "
+            f"found={outcome is not None}",
+            flush=True,
         )
 
         if outcome is None:
@@ -62,12 +68,18 @@ class OutcomeEvaluator:
         # CI evidence
         # -----------------------------------------
 
+        print("[webhook-debug] outcome: checks query started", flush=True)
         checks = (
             db.query(CheckRun)
             .filter(
                 CheckRun.pull_request_id == pull_request.id
             )
             .all()
+        )
+        print(
+            "[webhook-debug] outcome: checks query returned; "
+            f"count={len(checks)}",
+            flush=True,
         )
 
         failed_checks = 0
@@ -91,12 +103,18 @@ class OutcomeEvaluator:
         # Review evidence
         # -----------------------------------------
 
+        print("[webhook-debug] outcome: reviews query started", flush=True)
         reviews = (
             db.query(Review)
             .filter(
                 Review.pull_request_id == pull_request.id
             )
             .all()
+        )
+        print(
+            "[webhook-debug] outcome: reviews query returned; "
+            f"count={len(reviews)}",
+            flush=True,
         )
 
         change_requests = sum(
@@ -109,6 +127,7 @@ class OutcomeEvaluator:
         # Revert evidence
         # -----------------------------------------
 
+        print("[webhook-debug] outcome: revert query started", flush=True)
         revert_event = (
             db.query(RevertEvent)
             .filter(
@@ -116,6 +135,7 @@ class OutcomeEvaluator:
             )
             .first()
         )
+        print("[webhook-debug] outcome: revert query returned", flush=True)
 
         was_reverted = revert_event is not None
         # -----------------------------------------
@@ -145,7 +165,11 @@ class OutcomeEvaluator:
         outcome.observed_at = datetime.now(timezone.utc)
 
         db.add(outcome)
+        print("[webhook-debug] outcome: commit started", flush=True)
         db.commit()
+        print("[webhook-debug] outcome: commit returned", flush=True)
+        print("[webhook-debug] outcome: refresh started", flush=True)
         db.refresh(outcome)
+        print("[webhook-debug] outcome: refresh returned", flush=True)
 
         return outcome

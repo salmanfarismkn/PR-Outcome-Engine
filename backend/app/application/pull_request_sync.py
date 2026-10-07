@@ -113,17 +113,36 @@ class PullRequestSyncService:
     
     def _sync_changed_files(self, db: Session, pull_request: PullRequest) -> None:
         # Fetch commits for this PR
+        print(
+            "[webhook-debug] changed-file sync: GitHub commits request started",
+            flush=True,
+        )
         commits = self._github.list_commits(
             owner=pull_request.repository.owner,
             repository=pull_request.repository.name,
             pull_number=pull_request.number,
         )
+        print(
+            "[webhook-debug] changed-file sync: GitHub commits request returned; "
+            f"count={len(commits)}",
+            flush=True,
+        )
 
-        for commit in commits:
+        for index, commit in enumerate(commits, start=1):
+            print(
+                "[webhook-debug] changed-file sync: file request started; "
+                f"commit={index}/{len(commits)}, sha={commit.sha}",
+                flush=True,
+            )
             files = self._github.list_changed_files(
                 owner=pull_request.repository.owner,
                 repository=pull_request.repository.name,
                 pull_number=pull_request.number,
+            )
+            print(
+                "[webhook-debug] changed-file sync: file request returned; "
+                f"commit={index}/{len(commits)}, count={len(files)}",
+                flush=True,
             )
 
             for file in files:
@@ -147,23 +166,35 @@ class PullRequestSyncService:
         pull_request: PullRequest,
     ) -> None:
 
+        print("[webhook-debug] PR sync: listing GitHub commits started", flush=True)
         commits = self._github.list_commits(
             owner=pull_request.repository.owner,
             repository=pull_request.repository.name,
             pull_number=pull_request.number,
         )
+        print(
+            "[webhook-debug] PR sync: listing GitHub commits returned; "
+            f"count={len(commits)}",
+            flush=True,
+        )
 
         # delegate to CommitService instead of duplicating
+        print("[webhook-debug] PR sync: importing commits started", flush=True)
         self._commit_service.import_commits(
             db=db,
             pull_request=pull_request,
         )
+        print("[webhook-debug] PR sync: importing commits returned", flush=True)
 
 
 
+        print("[webhook-debug] PR sync: syncing changed files started", flush=True)
         self._sync_changed_files(
             db=db,
             pull_request=pull_request,
         )
+        print("[webhook-debug] PR sync: syncing changed files returned", flush=True)
 
+        print("[webhook-debug] PR sync: final commit started", flush=True)
         db.commit()
+        print("[webhook-debug] PR sync: final commit returned", flush=True)

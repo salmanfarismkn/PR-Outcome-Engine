@@ -21,19 +21,35 @@ class CommitService:
         imported = 0
         skipped = 0
 
+        print("[webhook-debug] commit import: existing SHA query started", flush=True)
         existing_shas = set(
             db.scalars(
                 select(Commit.sha)
             ).all()
         )
+        print(
+            "[webhook-debug] commit import: existing SHA query returned; "
+            f"count={len(existing_shas)}",
+            flush=True,
+        )
 
         for commit in commits:
 
             if commit.sha in existing_shas:
+                print(
+                    "[webhook-debug] commit import: existing commit query started; "
+                    f"sha={commit.sha}",
+                    flush=True,
+                )
                 existing_commit = db.scalar(
                     select(Commit).where(
                         Commit.sha == commit.sha
                     )
+                )
+                print(
+                    "[webhook-debug] commit import: existing commit query returned; "
+                    f"found={existing_commit is not None}",
+                    flush=True,
                 )
 
                 if (
@@ -59,7 +75,9 @@ class CommitService:
 
             imported += 1
 
+        print("[webhook-debug] commit import: commit started", flush=True)
         db.commit()
+        print("[webhook-debug] commit import: commit returned", flush=True)
 
         return CommitImportSummary(
             imported=imported,

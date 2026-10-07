@@ -86,31 +86,43 @@ async def github_webhook(
         payload
     )
 
+    print(
+        "[webhook-debug] endpoint: mark_processing started; "
+        f"event={x_github_event!r}, delivery={x_github_delivery}",
+        flush=True,
+    )
     webhook_service.mark_processing(
         db=db,
         event=event,
     )
+    print("[webhook-debug] endpoint: mark_processing returned", flush=True)
 
     try:
+        print("[webhook-debug] endpoint: dispatch started", flush=True)
         webhook_dispatcher.dispatch(
             db=db,
             event_type=x_github_event,
             payload=data,
             delivery_id=x_github_delivery,
         )
+        print("[webhook-debug] endpoint: dispatch returned", flush=True)
 
+        print("[webhook-debug] endpoint: mark_processed started", flush=True)
         webhook_service.mark_processed(
             db=db,
             event=event,
         )
+        print("[webhook-debug] endpoint: mark_processed returned", flush=True)
 
     except WebhookDependencyPending as exc:
 
+        print("[webhook-debug] endpoint: mark_pending started", flush=True)
         webhook_service.mark_pending(
             db=db,
             event=event,
             reason=str(exc),
         )
+        print("[webhook-debug] endpoint: mark_pending returned", flush=True)
 
         return {
             "status": "pending",
@@ -119,11 +131,17 @@ async def github_webhook(
 
     except Exception as exc:
 
+        print(
+            "[webhook-debug] endpoint: mark_failed started; "
+            f"error={type(exc).__name__}: {exc}",
+            flush=True,
+        )
         webhook_service.mark_failed(
             db=db,
             event=event,
             error_message=str(exc),
         )
+        print("[webhook-debug] endpoint: mark_failed returned", flush=True)
 
         raise HTTPException(
             status_code=500,
