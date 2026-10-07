@@ -66,6 +66,12 @@ class GitHubClient:
             for repo in response.json()
         ]
 
+    def get_repository(self, owner: str, repository: str) -> GitHubRepository:
+        response = self._client.get(f"/repos/{owner}/{repository}")
+        response.raise_for_status()
+
+        return GitHubRepository.model_validate(response.json())
+
     def list_pull_requests(
         self,
         owner: str,
@@ -187,46 +193,46 @@ class GitHubClient:
 
         return response.json()
 
-def create_pull_request(
-    self,
-    owner: str,
-    repository: str,
-    *,
-    title: str,
-    body: str,
-    head: str,
-    base: str = "main",
-) -> GitHubPullRequest:
-    response = self._client.post(
-        f"/repos/{owner}/{repository}/pulls",
-        json={
-            "title": title,
-            "body": body,
-            "head": head,
-            "base": base,
-        },
-    )
+    def create_pull_request(
+        self,
+        owner: str,
+        repository: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str = "main",
+    ) -> GitHubPullRequest:
+        response = self._client.post(
+            f"/repos/{owner}/{repository}/pulls",
+            json={
+                "title": title,
+                "body": body,
+                "head": head,
+                "base": base,
+            },
+        )
 
-    response.raise_for_status()
+        response.raise_for_status()
 
-    return GitHubPullRequest.model_validate(
-        response.json()
-    )
+        return GitHubPullRequest.model_validate(
+            response.json()
+        )
 
 
-def merge_pull_request(
-    self,
-    owner: str,
-    repository: str,
-    pull_number: int,
-) -> dict:
-    response = self._client.put(
-        f"/repos/{owner}/{repository}/pulls/{pull_number}/merge",
-        json={
-            "merge_method": "squash",
-        },
-    )
+    def merge_pull_request(
+        self,
+        owner: str,
+        repository: str,
+        pull_number: int,
+    ) -> dict:
+        response = self._client.put(
+            f"/repos/{owner}/{repository}/pulls/{pull_number}/merge",
+            json={
+                "merge_method": "squash",
+            },
+        )
 
-    response.raise_for_status()
+        response.raise_for_status()
 
-    return response.json()
+        return response.json()
