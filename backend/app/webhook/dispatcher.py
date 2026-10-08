@@ -86,16 +86,25 @@ class WebhookDispatcher:
         payload: dict,
     ) -> None:
 
+        print("[webhook-debug] pull_request: validating payload", flush=True)
         webhook_payload = (
             PullRequestWebhookPayload.model_validate(
                 payload
             )
         )
+        print(
+            "[webhook-debug] pull_request: payload validated; "
+            f"action={webhook_payload.action!r}, "
+            f"number={webhook_payload.pull_request.number}",
+            flush=True,
+        )
 
+        print("[webhook-debug] pull_request: process started", flush=True)
         self._pull_request_service.process(
             db=db,
             payload=webhook_payload,
         )
+        print("[webhook-debug] pull_request: process returned", flush=True)
 
     def _handle_pull_request_review(
         self,
