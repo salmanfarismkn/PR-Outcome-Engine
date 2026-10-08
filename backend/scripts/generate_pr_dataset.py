@@ -62,6 +62,130 @@ def report_github_error(action: str, error: Exception) -> SystemExit:
         )
     return SystemExit(f"{action} failed: {error}")
 
+
+def wait_for_ci_failure(
+    *,
+    github: GitHubService,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    pull_request_id: int,
+    timeout_seconds: int = 180,
+    poll_interval_seconds: int = 3,
+) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+
+    status_url = (
+        f"{BACKEND_URL}/dataset/pr/github/"
+        f"{owner}/{repo}/{pr_number}/status"
+    )
+    import_url = (
+        f"{BACKEND_URL}/check-runs/import/{pull_request_id}"
+    )
+
+    print(
+        f"Waiting for CI failure evidence on PR #{pr_number}..."
+    )
+
+    try:
+        pull_request = github.get_pull_request(
+            owner,
+            repo,
+            pr_number,
+        )
+    except (
+        httpx.HTTPStatusError,
+        httpx.RequestError,
+    ) as error:
+        raise report_github_error(
+            f"Could not read checks for PR #{pr_number}",
+            error,
+        ) from error
+
+    with httpx.Client(timeout=10.0) as client:
+        while time.monotonic() < deadline:
+            try:
+                response = client.get(status_url)
+            except httpx.RequestError:
+                time.sleep(poll_interval_seconds)
+                continue
+
+            if response.status_code == 404:
+                time.sleep(poll_interval_seconds)
+                continue
+
+            response.raise_for_status()
+            status = response.json()
+
+            if status["failed_checks"] > 0:
+                print(
+                    f"CI failure confirmed: "
+                    f"failed_checks={status['failed_checks']}"
+                )
+                return status
+
+            try:
+                check_runs = github.list_check_runs(
+                    owner,
+                    repo,
+                    pull_request.head.ref,
+                )
+            except (
+                httpx.HTTPStatusError,
+                httpx.RequestError,
+            ) as error:
+                raise report_github_error(
+                    f"Could not read checks for PR #{pr_number}",
+                    error,
+                ) from error
+
+            has_failed_check = any(
+                check.status == "completed"
+                and check.conclusion in {
+                    "failure",
+                    "cancelled",
+                    "timed_out",
+                    "action_required",
+                }
+                for check in check_runs
+            )
+            if has_failed_check:
+                print(
+                    "GitHub reports a completed failed check; "
+                    "syncing checks to the backend..."
+                )
+                try:
+                    import_response = client.post(import_url)
+                    import_response.raise_for_status()
+                except httpx.HTTPStatusError as error:
+                    raise SystemExit(
+                        "Could not sync GitHub checks to the backend: "
+                        f"HTTP {error.response.status_code} "
+                        f"({error.response.reason_phrase})."
+                    ) from error
+                except httpx.RequestError as error:
+                    raise SystemExit(
+                        "Could not sync GitHub checks to the backend: "
+                        f"{error}"
+                    ) from error
+
+                response = client.get(status_url)
+                response.raise_for_status()
+                status = response.json()
+                if status["failed_checks"] > 0:
+                    print(
+                        f"CI failure confirmed: "
+                        f"failed_checks={status['failed_checks']}"
+                    )
+                    return status
+
+            time.sleep(poll_interval_seconds)
+
+    raise SystemExit(
+        f"Timed out waiting for CI failure "
+        f"on PR #{pr_number}."
+    )
+
 BACKEND_URL = "http://127.0.0.1:8000"
 
 
@@ -125,6 +249,7 @@ def generate_one_pr(
     owner: str,
     repository: str,
     base_branch: str,
+    scenario: str,
 ) -> None:
     run_id = (
         datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -174,7 +299,9 @@ def generate_one_pr(
                 branch,
             )
 
-            (worktree_path / filename).write_text(
+            dataset_file = worktree_path / filename
+
+            dataset_file.write_text(
                 f"Automated PR dataset example {run_id}\n",
                 encoding="utf-8",
             )
@@ -185,6 +312,21 @@ def generate_one_pr(
                 "--",
                 filename,
             )
+
+            if scenario == "ci_failure":
+                failure_marker = worktree_path / ".dataset-ci-failure"
+
+                failure_marker.write_text(
+                    "Intentional CI failure for PR Risk Analyzer dataset generation.\n",
+                    encoding="utf-8",
+                )
+
+                run_git(
+                    worktree_path,
+                    "add",
+                    "--",
+                    ".dataset-ci-failure",
+                )
 
             run_git(
                 worktree_path,
@@ -247,7 +389,20 @@ def generate_one_pr(
                 repo=repository,
                 pr_number=pr.number,
             )
+            
+            if scenario == "ci_failure":
+                status = wait_for_ci_failure(
+                    github=github,
+                    owner=owner,
+                    repo=repository,
+                    pr_number=pr.number,
+                    pull_request_id=status["pull_request_id"],
+                )
 
+                print(
+                    "Problematic CI evidence confirmed."
+                )
+                
             print(
                 "PR processing confirmed: "
                 f"snapshot={status['snapshot_created']}, "
@@ -315,7 +470,12 @@ def main() -> None:
         default=1,
         help="Number of real GitHub PR dataset examples to generate.",
     )
-
+    parser.add_argument(
+        "--scenario",
+        choices=["healthy", "ci_failure"],
+        default="healthy",
+        help="Dataset scenario to generate.",
+    )
     args = parser.parse_args()
 
     if args.count < 1:
@@ -383,6 +543,7 @@ def main() -> None:
                 owner=args.owner,
                 repository=args.repo,
                 base_branch=base_branch,
+                scenario=args.scenario,
             )
 
     finally:

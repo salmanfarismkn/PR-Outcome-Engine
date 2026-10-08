@@ -10,6 +10,7 @@ from app.pull_request.models import PullRequest
 from app.feature.models import PRFeatureSnapshot
 from app.outcome.models import PullRequestOutcome
 from app.repository.models import Repository
+from app.check.models import CheckRun
 
 router = APIRouter(
     prefix="/dataset",
@@ -58,7 +59,8 @@ def get_pr_dataset_status(
     snapshot = db.scalar(
         select(PRFeatureSnapshot)
         .where(
-            PRFeatureSnapshot.pull_request_id == pull_request.id
+            PRFeatureSnapshot.pull_request_id
+            == pull_request.id
         )
         .order_by(
             PRFeatureSnapshot.created_at.desc()
@@ -70,6 +72,16 @@ def get_pr_dataset_status(
             PullRequestOutcome.pull_request_id
             == pull_request.id
         )
+    )
+
+    check_runs = (
+        db.scalars(
+            select(CheckRun).where(
+                CheckRun.pull_request_id
+                == pull_request.id
+            )
+        )
+        .all()
     )
 
     return {
@@ -89,5 +101,26 @@ def get_pr_dataset_status(
             outcome.outcome
             if outcome is not None
             else None
+        ),
+        "check_count": len(check_runs),
+        "successful_checks": sum(
+            1
+            for check in check_runs
+            if check.conclusion == "success"
+        ),
+        "failed_checks": sum(
+            1
+            for check in check_runs
+            if check.conclusion in {
+                "failure",
+                "cancelled",
+                "timed_out",
+                "action_required",
+            }
+        ),
+        "pending_checks": sum(
+            1
+            for check in check_runs
+            if check.status != "completed"
         ),
     }
