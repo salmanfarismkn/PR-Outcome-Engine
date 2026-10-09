@@ -258,7 +258,6 @@ def generate_one_pr(
     )
 
     branch = f"dataset/auto-pr-{run_id}"
-    filename = f"dataset_generated_{run_id}.txt"
 
     print()
     print("=" * 60)
@@ -299,20 +298,67 @@ def generate_one_pr(
                 branch,
             )
 
-            dataset_file = worktree_path / filename
+            # ---------------------------------------------------------
+            # Generate a variable-size PR
+            # ---------------------------------------------------------
+            # Use the run id to deterministically vary PR complexity.
+            profile_seed = int(run_id.split("-")[0][-2:])
 
-            dataset_file.write_text(
-                f"Automated PR dataset example {run_id}\n",
-                encoding="utf-8",
+            profiles = [
+                # (number_of_files, lines_per_file, number_of_commits)
+                (1, 3, 1),
+                (2, 5, 1),
+                (3, 8, 2),
+                (4, 12, 2),
+                (5, 15, 3),
+                (6, 20, 3),
+                (8, 25, 4),
+            ]
+
+            file_count, lines_per_file, commit_count = profiles[
+                profile_seed % len(profiles)
+            ]
+
+            print(
+                f"Generating PR profile: "
+                f"files={file_count}, "
+                f"lines_per_file={lines_per_file}, "
+                f"commits={commit_count}"
             )
+
+            generated_files: list[Path] = []
+
+            for file_index in range(file_count):
+                generated_file = (
+                    worktree_path
+                    / f"dataset_generated_{run_id}_{file_index}.txt"
+                )
+
+                content = "".join(
+                    f"Dataset sample {run_id} "
+                    f"file={file_index} "
+                    f"line={line_index}\n"
+                    for line_index in range(lines_per_file)
+                )
+
+                generated_file.write_text(
+                    content,
+                    encoding="utf-8",
+                )
+
+                generated_files.append(generated_file)
 
             run_git(
                 worktree_path,
                 "add",
                 "--",
-                filename,
+                *[
+                    str(path.relative_to(worktree_path))
+                    for path in generated_files
+                ],
             )
 
+            # Add the CI-failure marker only for the problematic scenario.
             if scenario == "ci_failure":
                 failure_marker = worktree_path / ".dataset-ci-failure"
 
@@ -332,8 +378,56 @@ def generate_one_pr(
                 worktree_path,
                 "commit",
                 "-m",
-                f"dataset: automated PR example {run_id}",
+                f"dataset: automated PR example {run_id} changes",
             )
+
+            # For larger profiles, make a second commit that modifies
+            # existing files. This gives the dataset commit-count variation.
+            if commit_count >= 2:
+                target_file = generated_files[0]
+
+                with target_file.open("a", encoding="utf-8") as file:
+                    for extra_line in range(lines_per_file // 2):
+                        file.write(
+                            f"Additional dataset change "
+                            f"{run_id} {extra_line}\n"
+                        )
+
+                run_git(
+                    worktree_path,
+                    "add",
+                    "--",
+                    str(target_file.relative_to(worktree_path)),
+                )
+
+                run_git(
+                    worktree_path,
+                    "commit",
+                    "-m",
+                    f"dataset: expand generated change {run_id}",
+                )
+
+            # For the largest profiles, delete one generated file.
+            # This introduces genuine deletion features.
+            if file_count >= 6:
+                deleted_file = generated_files[-1]
+
+                deleted_file.unlink()
+
+                run_git(
+                    worktree_path,
+                    "add",
+                    "-A",
+                    "--",
+                    str(deleted_file.relative_to(worktree_path)),
+                )
+
+                run_git(
+                    worktree_path,
+                    "commit",
+                    "-m",
+                    f"dataset: remove generated file {run_id}",
+                )
 
             print("Checking push access...")
 
@@ -402,7 +496,7 @@ def generate_one_pr(
                 print(
                     "Problematic CI evidence confirmed."
                 )
-                
+
             print(
                 "PR processing confirmed: "
                 f"snapshot={status['snapshot_created']}, "

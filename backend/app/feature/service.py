@@ -12,7 +12,7 @@ from app.check.models import CheckRun
 
 from app.feature.schemas import PRFeatureSnapshot
 from app.feature.models import PRFeatureSnapshot as PRFeatureSnapshotModel
-
+from app.changed_file.models import ChangedFile
 
 
 class PRFeatureService:
@@ -23,7 +23,11 @@ class PRFeatureService:
         pull_request: PullRequest,
     ) -> PRFeatureSnapshot:
 
-        print("[webhook-debug] snapshot: commits query started", flush=True)
+        print(
+            "[webhook-debug] snapshot: commits query started",
+            flush=True,
+        )
+
         commits = list(
             db.scalars(
                 select(Commit).where(
@@ -31,13 +35,18 @@ class PRFeatureService:
                 )
             )
         )
+
         print(
             "[webhook-debug] snapshot: commits query returned; "
             f"count={len(commits)}",
             flush=True,
         )
 
-        print("[webhook-debug] snapshot: reviews query started", flush=True)
+        print(
+            "[webhook-debug] snapshot: reviews query started",
+            flush=True,
+        )
+
         reviews = list(
             db.scalars(
                 select(Review).where(
@@ -45,13 +54,18 @@ class PRFeatureService:
                 )
             )
         )
+
         print(
             "[webhook-debug] snapshot: reviews query returned; "
             f"count={len(reviews)}",
             flush=True,
         )
 
-        print("[webhook-debug] snapshot: checks query started", flush=True)
+        print(
+            "[webhook-debug] snapshot: checks query started",
+            flush=True,
+        )
+
         checks = list(
             db.scalars(
                 select(CheckRun).where(
@@ -59,59 +73,79 @@ class PRFeatureService:
                 )
             )
         )
+
         print(
             "[webhook-debug] snapshot: checks query returned; "
             f"count={len(checks)}",
             flush=True,
         )
 
+        changed_files = list(
+            db.scalars(
+                select(ChangedFile).where(
+                    ChangedFile.pull_request_id
+                    == pull_request.id
+                )
+            )
+        )
+
         additions = sum(
-            getattr(commit, "additions", 0) or 0
-            for commit in commits
+            file.additions or 0
+            for file in changed_files
         )
 
         deletions = sum(
-            getattr(commit, "deletions", 0) or 0
-            for commit in commits
+            file.deletions or 0
+            for file in changed_files
         )
 
+        changed_files_count = len(changed_files)
+
         unique_authors = {
-            getattr(commit, "author_name", None)
+            commit.author_name
             for commit in commits
             if getattr(commit, "author_name", None)
         }
 
         unique_reviewers = {
-            getattr(review, "reviewer_login", None)
+            review.reviewer_login
             for review in reviews
             if getattr(review, "reviewer_login", None)
         }
 
         approvals = sum(
-            1 for review in reviews
+            1
+            for review in reviews
             if review.state.upper() == "APPROVED"
         )
 
         change_requests = sum(
-            1 for review in reviews
+            1
+            for review in reviews
             if review.state.upper() == "CHANGES_REQUESTED"
         )
 
         successful_checks = sum(
-            1 for check in checks
+            1
+            for check in checks
             if check.conclusion == "success"
         )
 
         failed_checks = sum(
-            1 for check in checks
+            1
+            for check in checks
             if check.conclusion in {
-                "failure", "cancelled", "timed_out", "action_required"
+                "failure",
+                "cancelled",
+                "timed_out",
+                "action_required",
             }
         )
 
         pending_checks = sum(
-            1 for check in checks
-            if check.status not in {"completed"}
+            1
+            for check in checks
+            if check.status != "completed"
         )
 
         created_at = pull_request.created_at
@@ -122,19 +156,22 @@ class PRFeatureService:
                 0,
                 (now - created_at).total_seconds() / 3600,
             )
-            if created_at else 0
+            if created_at
+            else 0
         )
 
-        changed_files_list = getattr(pull_request, "changed_files", []) or []
-        changed_files_count = len(changed_files_list)
+        print(
+            "[webhook-debug] snapshot: feature values computed",
+            flush=True,
+        )
 
-        print("[webhook-debug] snapshot: feature values computed", flush=True)
         return PRFeatureSnapshot(
             pull_request_id=pull_request.id,
 
             additions=additions,
             deletions=deletions,
-            changed_files=changed_files_count,  
+            changed_files=changed_files_count,
+
             commit_count=len(commits),
             unique_authors=len(unique_authors),
 
@@ -148,8 +185,11 @@ class PRFeatureService:
             failed_checks=failed_checks,
             pending_checks=pending_checks,
 
-            is_draft=getattr(pull_request, "draft", False),
-
+            is_draft=getattr(
+                pull_request,
+                "draft",
+                False,
+            ),
 
             age_hours=age_hours,
         )
