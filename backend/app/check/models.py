@@ -4,8 +4,8 @@ from datetime import datetime
 
 from sqlalchemy import (
     ForeignKey,
+    BigInteger,
     Index,
-    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -38,7 +38,7 @@ class CheckRun(BaseModel):
     )
 
     github_id: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         nullable=False,
     )
 
