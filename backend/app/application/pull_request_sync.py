@@ -111,53 +111,44 @@ class PullRequestSyncService:
     ) -> None:
         return
     
-    def _sync_changed_files(self, db: Session, pull_request: PullRequest) -> None:
-        # Fetch commits for this PR
-        print(
-            "[webhook-debug] changed-file sync: GitHub commits request started",
-            flush=True,
-        )
-        commits = self._github.list_commits(
+    def _sync_changed_files(
+        self,
+        db: Session,
+        pull_request: PullRequest,
+    ) -> None:
+        print("Changed-file sync: GitHub request started")
+
+        files = self._github.list_changed_files(
             owner=pull_request.repository.owner,
             repository=pull_request.repository.name,
             pull_number=pull_request.number,
         )
-        print(
-            "[webhook-debug] changed-file sync: GitHub commits request returned; "
-            f"count={len(commits)}",
-            flush=True,
-        )
 
-        for index, commit in enumerate(commits, start=1):
-            print(
-                "[webhook-debug] changed-file sync: file request started; "
-                f"commit={index}/{len(commits)}, sha={commit.sha}",
-                flush=True,
-            )
-            files = self._github.list_changed_files(
-                owner=pull_request.repository.owner,
-                repository=pull_request.repository.name,
-                pull_number=pull_request.number,
-            )
-            print(
-                "[webhook-debug] changed-file sync: file request returned; "
-                f"commit={index}/{len(commits)}, count={len(files)}",
-                flush=True,
-            )
+        print(f"Changed-file sync: received {len(files)} files")
 
-            for file in files:
-                db.add(
-                    ChangedFile(
-                        commit_id=None,  # allowed if schema is updated
-                        pull_request_id=pull_request.id,
-                        filename=file.filename,
-                        status=file.status,
-                        additions=file.additions,
-                        deletions=file.deletions,
-                        changes=file.changes,
-                        patch=file.patch,
-                    )
+        # Replace the current PR-level file snapshot.
+        db.query(ChangedFile).filter(
+            ChangedFile.pull_request_id == pull_request.id
+        ).delete(synchronize_session=False)
+
+        for file in files:
+            db.add(
+                ChangedFile(
+                    commit_id=None,
+                    pull_request_id=pull_request.id,
+                    filename=file.filename,
+                    previous_filename=getattr(
+                        file,
+                        "previous_filename",
+                        None,
+                    ),
+                    status=file.status,
+                    additions=file.additions,
+                    deletions=file.deletions,
+                    changes=file.changes,
+                    patch=file.patch,
                 )
+            )
 
 
     def sync_pull_request(

@@ -108,20 +108,28 @@ class PullRequestWebhookService:
         print("[webhook-debug] PR process: refresh returned", flush=True)
 
         # Synchronize the PR when new commits arrive.
-        if payload.action == "synchronize":
-            print("[webhook-debug] PR process: synchronize started", flush=True)
+        if payload.action in {
+            "opened",
+            "reopened",
+            "synchronize",
+        }:
+            print(
+                "[webhook-debug] PR webhook: synchronization started",
+                flush=True,
+            )
+
             self._sync_service.sync_pull_request(
                 db=db,
                 pull_request=pull_request,
             )
-            print("[webhook-debug] PR process: synchronize returned", flush=True)
 
-            print("[webhook-debug] PR process: sync commit started", flush=True)
             db.commit()
-            print("[webhook-debug] PR process: sync commit returned", flush=True)
-            print("[webhook-debug] PR process: sync refresh started", flush=True)
             db.refresh(pull_request)
-            print("[webhook-debug] PR process: sync refresh returned", flush=True)
+
+            print(
+                "[webhook-debug] PR webhook: synchronization completed",
+                flush=True,
+            )
 
         # Record merge outcome.
         if (
