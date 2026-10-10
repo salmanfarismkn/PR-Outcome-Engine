@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -30,4 +32,5 @@ class PRFeatureSnapshot(BaseModel):
   
 
     # Temporal information
+    created_at: datetime
     age_hours: float

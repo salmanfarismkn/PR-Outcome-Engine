@@ -297,6 +297,13 @@ def generate_one_pr(
                 "-c",
                 branch,
             )
+            base_tracked_files = run_git(
+                worktree_path,
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "HEAD",
+            ).splitlines()
 
             # ---------------------------------------------------------
             # Generate a variable-size PR
@@ -383,15 +390,32 @@ def generate_one_pr(
 
             # For larger profiles, make a second commit that modifies
             # existing files. This gives the dataset commit-count variation.
+
             if commit_count >= 2:
                 target_file = generated_files[0]
 
-                with target_file.open("a", encoding="utf-8") as file:
-                    for extra_line in range(lines_per_file // 2):
-                        file.write(
-                            f"Additional dataset change "
-                            f"{run_id} {extra_line}\n"
-                        )
+                original_lines = target_file.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+
+                replacement_count = max(
+                    1,
+                    len(original_lines) // 3,
+                )
+
+                retained_lines = original_lines[replacement_count:]
+
+                replacement_lines = [
+                    f"Updated dataset content {run_id} line={index}"
+                    for index in range(replacement_count)
+                ]
+
+                target_file.write_text(
+                    "\n".join(
+                        replacement_lines + retained_lines
+                    ) + "\n",
+                    encoding="utf-8",
+                )
 
                 run_git(
                     worktree_path,
@@ -404,30 +428,66 @@ def generate_one_pr(
                     worktree_path,
                     "commit",
                     "-m",
-                    f"dataset: expand generated change {run_id}",
+                    f"dataset: revise existing content {run_id}",
                 )
 
-            # For the largest profiles, delete one generated file.
-            # This introduces genuine deletion features.
-            if file_count >= 6:
-                deleted_file = generated_files[-1]
+            # Remove a line from a previously merged synthetic sample. Deleting
+            # a file created in this branch would cancel out of the PR diff.
+            prior_samples = sorted(
+                (
+                    worktree_path / relative_path
+                    for relative_path in base_tracked_files
+                    if Path(relative_path).name.startswith(
+                        "dataset_generated_"
+                    )
+                    and Path(relative_path).suffix == ".txt"
+                ),
+                reverse=True,
+            )
+            deletion_target = next(
+                (
+                    path
+                    for path in prior_samples
+                    if len(
+                        path.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                    ) > 1
+                ),
+                None,
+            )
 
-                deleted_file.unlink()
-
-                run_git(
-                    worktree_path,
-                    "add",
-                    "-A",
-                    "--",
-                    str(deleted_file.relative_to(worktree_path)),
+            if deletion_target is None:
+                raise SystemExit(
+                    "Cannot generate a real deletion: the base branch "
+                    "has no tracked dataset_generated_*.txt sample with "
+                    "more than one line. Merge a dataset PR first."
                 )
 
-                run_git(
-                    worktree_path,
-                    "commit",
-                    "-m",
-                    f"dataset: remove generated file {run_id}",
-                )
+            sample_lines = deletion_target.read_text(
+                encoding="utf-8"
+            ).splitlines(keepends=True)
+            deletion_target.write_text(
+                "".join(sample_lines[1:]),
+                encoding="utf-8",
+            )
+
+            relative_deletion_target = str(
+                deletion_target.relative_to(worktree_path)
+            )
+            run_git(
+                worktree_path,
+                "add",
+                "--",
+                relative_deletion_target,
+            )
+            run_git(
+                worktree_path,
+                "commit",
+                "-m",
+                f"dataset: remove a prior sample line {run_id}",
+            )
+
 
             print("Checking push access...")
 
