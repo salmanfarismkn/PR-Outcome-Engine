@@ -19,14 +19,37 @@ class ReviewSyncService:
         pull_request: PullRequest,
     ) -> ReviewImportSummary:
 
-        reviews = self._github.list_reviews(
-            owner=pull_request.repository.owner,
-            repository=pull_request.repository.name,
-            pull_number=pull_request.number,
+        owner = pull_request.repository.owner
+        repository = pull_request.repository.name
+        print(
+            "[review-import-debug] resolving reviews: "
+            f"internal_pull_request_id={pull_request.id}, "
+            f"github_repository={owner}/{repository}, "
+            f"github_pull_number={pull_request.number}",
+            flush=True,
         )
 
-        return self._review_service.import_reviews(
+        reviews = self._github.list_reviews(
+            owner=owner,
+            repository=repository,
+            pull_number=pull_request.number,
+        )
+        print(
+            "[review-import-debug] GitHub returned typed reviews: "
+            f"count={len(reviews)}",
+            flush=True,
+        )
+
+        summary = self._review_service.import_reviews(
             db=db,
             pull_request_id=pull_request.id,
             reviews=reviews,
         )
+        print(
+            "[review-import-debug] import complete: "
+            f"imported={summary.imported}, "
+            f"skipped={summary.skipped}, "
+            f"total={summary.total}",
+            flush=True,
+        )
+        return summary

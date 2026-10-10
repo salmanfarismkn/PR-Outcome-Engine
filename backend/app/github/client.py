@@ -131,15 +131,39 @@ class GitHubClient:
         pull_number: int,
     ) -> list[GitHubReview]:
 
+        endpoint = (
+            f"/repos/{owner}/{repository}/pulls/{pull_number}/reviews"
+        )
+        print(
+            f"[review-import-debug] GET {self._client.base_url.join(endpoint)}",
+            flush=True,
+        )
         response = self._client.get(
-            f"/repos/{owner}/{repository}/pulls/{pull_number}/reviews",
+            endpoint,
+        )
+        print(
+            "[review-import-debug] GitHub reviews response: "
+            f"status={response.status_code}, "
+            f"url={response.request.url}",
+            flush=True,
         )
 
         response.raise_for_status()
+        raw_reviews = response.json()
+        raw_count = (
+            len(raw_reviews)
+            if isinstance(raw_reviews, list)
+            else "non-list response"
+        )
+        print(
+            "[review-import-debug] raw GitHub review count: "
+            f"{raw_count}",
+            flush=True,
+        )
 
         return [
             GitHubReview.model_validate(review)
-            for review in response.json()
+            for review in raw_reviews
         ]
 
     def list_check_runs(
