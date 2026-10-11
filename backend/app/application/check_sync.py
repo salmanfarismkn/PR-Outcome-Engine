@@ -19,26 +19,17 @@ class CheckSyncService:
         db: Session,
         pull_request: PullRequest,
     ) -> CheckRunImportSummary:
-
-        commits = self._github.list_commits(
+        github_pr = self._github.get_pull_request(
             owner=pull_request.repository.owner,
             repository=pull_request.repository.name,
             pull_number=pull_request.number,
         )
-
-        if not commits:
-            return CheckRunImportSummary(
-                imported=0,
-                skipped=0,
-                total=0,
-            )
-
-        latest_commit = commits[-1]
+        pull_request.head_sha = github_pr.head.sha
 
         check_runs = self._github.list_check_runs(
             owner=pull_request.repository.owner,
             repository=pull_request.repository.name,
-            ref=latest_commit.sha,
+            ref=github_pr.head.sha,
         )
 
         return self._check_service.import_check_runs(
@@ -46,3 +37,6 @@ class CheckSyncService:
             pull_request_id=pull_request.id,
             check_runs=check_runs,
         )
+
+    def close(self) -> None:
+        self._github.close()

@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.application.check_sync import CheckSyncService
+from app.application.outcome_evaluation import evaluate_pull_request_outcome
 from app.check.schemas import CheckRunImportSummary
 from app.db.session import get_db
+from app.feature.service import PRFeatureService
 from app.pull_request.models import PullRequest
 
 
@@ -38,7 +40,17 @@ def import_check_runs(
             detail="Pull request not found.",
         )
 
-    return check_sync_service.import_check_runs(
+    summary = check_sync_service.import_check_runs(
         db=db,
         pull_request=pull_request,
     )
+    db.refresh(pull_request)
+    PRFeatureService().create_snapshot(
+        db=db,
+        pull_request=pull_request,
+    )
+    evaluate_pull_request_outcome(
+        db=db,
+        pull_request_id=pull_request.id,
+    )
+    return summary

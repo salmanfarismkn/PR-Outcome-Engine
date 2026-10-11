@@ -42,13 +42,13 @@ def main() -> None:
                 skipped_reviews += result.skipped
                 total_reviews += result.total
 
-                feature_service.create_snapshot(
+                snapshot = feature_service.create_snapshot(
                     db=db,
                     pull_request=pull_request,
                 )
 
                 processed += 1
-                snapshots_refreshed += 1
+                snapshots_refreshed += snapshot is not None
 
                 logger.info(
                     "Processed PR id=%s number=%s: "

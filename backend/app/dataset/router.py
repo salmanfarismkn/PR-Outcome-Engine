@@ -23,12 +23,11 @@ def get_training_dataset(
     db: Session = Depends(get_db),
 ):
     service = TrainingDatasetService()
+    dataset = service.build_dataset(db)
 
     return {
-        "count": len(
-            service.build_dataset(db)
-        ),
-        "data": service.build_dataset(db),
+        "count": len(dataset),
+        "data": dataset,
     }
 
 

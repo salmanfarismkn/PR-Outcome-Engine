@@ -7,6 +7,7 @@ from app.application.review_sync import ReviewSyncService
 from app.db.session import get_db
 from app.pull_request.models import PullRequest
 from app.review.schemas import ReviewImportSummary
+from app.feature.service import PRFeatureService
 
 
 router = APIRouter(
@@ -38,7 +39,13 @@ def import_reviews(
             detail="Pull request not found.",
         )
 
-    return review_sync_service.import_reviews(
+    summary = review_sync_service.import_reviews(
         db=db,
         pull_request=pull_request,
     )
+    if not pull_request.merged:
+        PRFeatureService().create_snapshot(
+            db=db,
+            pull_request=pull_request,
+        )
+    return summary

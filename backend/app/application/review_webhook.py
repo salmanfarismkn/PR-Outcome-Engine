@@ -58,7 +58,6 @@ class ReviewWebhookService:
                 state=github_review.state,
                 body=github_review.body,
                 submitted_at=github_review.submitted_at,
-                html_url=github_review.html_url,
             )
             db.add(review)
         else:
@@ -67,7 +66,6 @@ class ReviewWebhookService:
             review.state = github_review.state
             review.body = github_review.body
             review.submitted_at = github_review.submitted_at
-            review.html_url = github_review.html_url
 
         db.commit()
         db.refresh(review)

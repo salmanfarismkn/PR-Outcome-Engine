@@ -60,15 +60,19 @@ def create_pull_request_snapshot(
             detail="Pull request not found.",
         )
 
-    snapshot = service.build_snapshot(
+    record = service.create_snapshot(
         db=db,
         pull_request=pull_request,
     )
 
-    record = service.save_snapshot(
-        db=db,
-        snapshot=snapshot,
-    )
+    if record is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A feature snapshot requires an open pull request "
+                "with synchronized commits and changed files."
+            ),
+        )
 
     return {
         "id": record.id,

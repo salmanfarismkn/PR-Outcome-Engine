@@ -29,3 +29,4 @@ class CheckRunImportSummary(BaseModel):
     imported: int
     skipped: int
     total: int
+    updated: int = 0

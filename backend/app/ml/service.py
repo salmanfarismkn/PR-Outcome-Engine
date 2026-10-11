@@ -14,7 +14,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.dummy import DummyClassifier
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -37,7 +38,10 @@ class PRRiskModelService:
 
         df = pd.DataFrame(dataset)
 
-        required_columns = FEATURE_COLUMNS + ["label"]
+        required_columns = FEATURE_COLUMNS + [
+            "label",
+            "pull_request_id",
+        ]
         missing = set(required_columns) - set(df.columns)
 
         if missing:
@@ -50,6 +54,10 @@ class PRRiskModelService:
 
         if df.empty:
             raise ValueError("No complete training examples remain.")
+        if df["pull_request_id"].duplicated().any():
+            raise ValueError(
+                "Training data must contain at most one row per pull request."
+            )
 
         valid_labels = {"healthy", "problematic"}
         if not set(df["label"].unique()).issubset(valid_labels):
@@ -68,13 +76,24 @@ class PRRiskModelService:
                 "Each class needs at least two examples."
             )
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=0.25,
+        groups = df["pull_request_id"]
+        n_splits = min(4, int(y.value_counts().min()))
+        split = StratifiedGroupKFold(
+            n_splits=n_splits,
+            shuffle=True,
             random_state=42,
-            stratify=y,
         )
+        train_indices, test_indices = next(
+            split.split(X, y, groups=groups)
+        )
+        X_train, X_test = X.iloc[train_indices], X.iloc[test_indices]
+        y_train, y_test = y.iloc[train_indices], y.iloc[test_indices]
+
+        if y_train.nunique() != 2:
+            raise ValueError(
+                "The PR-level split left the training set with one class; "
+                "more labeled PRs are needed."
+            )
 
         model = Pipeline(
             steps=[
@@ -94,6 +113,10 @@ class PRRiskModelService:
 
         predictions = model.predict(X_test)
         probabilities = model.predict_proba(X_test)[:, 1]
+        baseline = DummyClassifier(strategy="most_frequent")
+        baseline.fit(X_train, y_train)
+        baseline_predictions = baseline.predict(X_test)
+        baseline_probabilities = baseline.predict_proba(X_test)[:, 1]
 
         metrics = {
             "accuracy": float(accuracy_score(y_test, predictions)),
@@ -106,7 +129,52 @@ class PRRiskModelService:
             "f1_problematic": float(
                 f1_score(y_test, predictions, zero_division=0)
             ),
-            "roc_auc": float(roc_auc_score(y_test, probabilities)),
+            "roc_auc": (
+                float(roc_auc_score(y_test, probabilities))
+                if y_test.nunique() == 2
+                else None
+            ),
+            "baseline": {
+                "strategy": "most_frequent",
+                "accuracy": float(
+                    accuracy_score(y_test, baseline_predictions)
+                ),
+                "precision_problematic": float(
+                    precision_score(
+                        y_test,
+                        baseline_predictions,
+                        zero_division=0,
+                    )
+                ),
+                "recall_problematic": float(
+                    recall_score(
+                        y_test,
+                        baseline_predictions,
+                        zero_division=0,
+                    )
+                ),
+                "f1_problematic": float(
+                    f1_score(
+                        y_test,
+                        baseline_predictions,
+                        zero_division=0,
+                    )
+                ),
+                "roc_auc": (
+                    float(roc_auc_score(y_test, baseline_probabilities))
+                    if y_test.nunique() == 2
+                    else None
+                ),
+            },
+            "split_strategy": "StratifiedGroupKFold by pull_request_id",
+            "training_class_distribution": {
+                "healthy": int((y_train == 0).sum()),
+                "problematic": int((y_train == 1).sum()),
+            },
+            "testing_class_distribution": {
+                "healthy": int((y_test == 0).sum()),
+                "problematic": int((y_test == 1).sum()),
+            },
             "classification_report": classification_report(
                 y_test,
                 predictions,

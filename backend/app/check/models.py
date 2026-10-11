@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ForeignKey,
@@ -13,6 +14,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
+
+if TYPE_CHECKING:
+    from app.pull_request.models import PullRequest
 
 
 class CheckRun(BaseModel):
@@ -48,6 +52,11 @@ class CheckRun(BaseModel):
             ondelete="CASCADE",
         ),
         nullable=False,
+    )
+
+    head_sha: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
     )
 
     name: Mapped[str] = mapped_column(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.commit.models import Commit
@@ -13,6 +14,9 @@ from app.check.models import CheckRun
 from app.feature.schemas import PRFeatureSnapshot
 from app.feature.models import PRFeatureSnapshot as PRFeatureSnapshotModel
 from app.changed_file.models import ChangedFile
+
+
+logger = logging.getLogger(__name__)
 
 
 class PRFeatureService:
@@ -73,6 +77,14 @@ class PRFeatureService:
                 )
             )
         )
+        if pull_request.head_sha:
+            checks = [
+                check
+                for check in checks
+                if check.head_sha == pull_request.head_sha
+            ]
+        else:
+            checks = []
 
         print(
             "[webhook-debug] snapshot: checks query returned; "
@@ -188,11 +200,7 @@ class PRFeatureService:
             failed_checks=failed_checks,
             pending_checks=pending_checks,
             created_at=snapshot_at,
-            is_draft=getattr(
-                pull_request,
-                "draft",
-                False,
-            ),
+            is_draft=pull_request.is_draft,
 
             age_hours=age_hours,
         )
@@ -224,13 +232,17 @@ class PRFeatureService:
                 and existing.deletions == snapshot.deletions
                 and existing.changed_files == snapshot.changed_files
                 and existing.commit_count == snapshot.commit_count
+                and existing.unique_authors == snapshot.unique_authors
                 and existing.review_count == snapshot.review_count
+                and existing.unique_reviewers == snapshot.unique_reviewers
                 and existing.approvals == snapshot.approvals
                 and existing.change_requests == snapshot.change_requests
                 and existing.check_count == snapshot.check_count
                 and existing.successful_checks == snapshot.successful_checks
                 and existing.failed_checks == snapshot.failed_checks
                 and existing.pending_checks == snapshot.pending_checks
+                and existing.is_draft == snapshot.is_draft
+                and existing.age_hours == snapshot.age_hours
             )
 
             
@@ -282,16 +294,33 @@ class PRFeatureService:
         self,
         db: Session,
         pull_request: PullRequest,
-    ) -> PRFeatureSnapshotModel:
+    ) -> PRFeatureSnapshotModel | None:
         """
-        Build a snapshot for the given pull request and save it.
+        Save a complete feature snapshot only while the PR is open.
         """
+        if pull_request.merged or pull_request.state != "open":
+            logger.info(
+                "Skipping feature snapshot for non-open pull request id=%d",
+                pull_request.id,
+            )
+            return None
+
         print("[webhook-debug] snapshot: build started", flush=True)
         snapshot = self.build_snapshot(
             db=db,
             pull_request=pull_request,
         )
         print("[webhook-debug] snapshot: build returned", flush=True)
+        if snapshot.commit_count <= 0 or snapshot.changed_files <= 0:
+            logger.warning(
+                "Skipping incomplete feature snapshot for pull request "
+                "id=%d (commits=%d, changed_files=%d)",
+                pull_request.id,
+                snapshot.commit_count,
+                snapshot.changed_files,
+            )
+            return None
+
         print("[webhook-debug] snapshot: save started", flush=True)
         return self.save_snapshot(
             db=db,

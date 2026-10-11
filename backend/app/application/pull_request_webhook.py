@@ -9,33 +9,26 @@ from app.application.pull_request_sync import (
 from app.pull_request.models import PullRequest
 from app.repository.models import Repository
 from app.webhook.schemas import PullRequestWebhookPayload
-from app import db
-from app.outcome.service import (
-    OutcomeEvaluator,
-)
-from app import pull_request
 from app.feature.service import PRFeatureService
 from app.application.outcome_evaluation import (
     evaluate_pull_request_outcome,
 )
 from app.application.review_sync import ReviewSyncService
+from app.application.check_sync import CheckSyncService
 
 SNAPSHOT_EVENTS = {
     "opened",
     "synchronize",
     "reopened",
-    "closed",
-    "review_requested",
 }
 
 class PullRequestWebhookService:
 
     def __init__(self) -> None:
         self._sync_service = PullRequestSyncService()
-        self._outcome_service = OutcomeEvaluator()
         self._feature_service = PRFeatureService()
         self._review_sync_service = ReviewSyncService()
-
+        self._check_sync_service = CheckSyncService()
 
     def process(
         self,
@@ -49,22 +42,31 @@ class PullRequestWebhookService:
             f"github_id={payload.pull_request.id}",
             flush=True,
         )
+
         if payload.action not in {
             "opened",
             "reopened",
             "synchronize",
             "closed",
         }:
-            print("[webhook-debug] PR process: action ignored", flush=True)
+            print(
+                "[webhook-debug] PR process: action ignored",
+                flush=True,
+            )
             return None
 
-        print("[webhook-debug] PR process: repository query started", flush=True)
+        print(
+            "[webhook-debug] PR process: repository query started",
+            flush=True,
+        )
+
         repository = db.scalar(
             select(Repository).where(
                 Repository.owner == payload.repository.owner["login"],
                 Repository.name == payload.repository.name,
             )
         )
+
         print(
             "[webhook-debug] PR process: repository query returned; "
             f"found={repository is not None}",
@@ -76,12 +78,17 @@ class PullRequestWebhookService:
                 "Repository from webhook does not exist locally."
             )
 
-        print("[webhook-debug] PR process: pull request query started", flush=True)
+        print(
+            "[webhook-debug] PR process: pull request query started",
+            flush=True,
+        )
+
         pull_request = db.scalar(
             select(PullRequest).where(
                 PullRequest.github_id == payload.pull_request.id
             )
         )
+
         print(
             "[webhook-debug] PR process: pull request query returned; "
             f"found={pull_request is not None}",
@@ -89,25 +96,51 @@ class PullRequestWebhookService:
         )
 
         if pull_request is None:
-            print("[webhook-debug] PR process: creating pull request", flush=True)
+            print(
+                "[webhook-debug] PR process: creating pull request",
+                flush=True,
+            )
+
             pull_request = self._create_pull_request(
                 db=db,
                 repository=repository,
                 payload=payload,
             )
+
         else:
-            print("[webhook-debug] PR process: updating pull request", flush=True)
+            print(
+                "[webhook-debug] PR process: updating pull request",
+                flush=True,
+            )
+
             self._update_pull_request(
                 pull_request=pull_request,
                 payload=payload,
             )
 
-        print("[webhook-debug] PR process: initial commit started", flush=True)
+        print(
+            "[webhook-debug] PR process: initial commit started",
+            flush=True,
+        )
+
         db.commit()
-        print("[webhook-debug] PR process: initial commit returned", flush=True)
-        print("[webhook-debug] PR process: refresh started", flush=True)
+
+        print(
+            "[webhook-debug] PR process: initial commit returned",
+            flush=True,
+        )
+
+        print(
+            "[webhook-debug] PR process: refresh started",
+            flush=True,
+        )
+
         db.refresh(pull_request)
-        print("[webhook-debug] PR process: refresh returned", flush=True)
+
+        print(
+            "[webhook-debug] PR process: refresh returned",
+            flush=True,
+        )
 
         # Synchronize the PR when new commits arrive.
         if payload.action in {
@@ -133,17 +166,27 @@ class PullRequestWebhookService:
                 flush=True,
             )
 
-        # Record merge outcome.
-        if (
-            payload.action == "closed"
-            and payload.pull_request.merged
-        ):
-            print("[webhook-debug] PR process: merged outcome started", flush=True)
-            self._outcome_service.evaluate(
+        # Synchronize GitHub check runs before reviews and snapshots.
+        if payload.action in {
+            "opened",
+            "reopened",
+            "synchronize",
+            "closed",
+        }:
+            print(
+                "[webhook-debug] PR webhook: check synchronization started",
+                flush=True,
+            )
+
+            self._check_sync_service.import_check_runs(
                 db=db,
                 pull_request=pull_request,
             )
-            print("[webhook-debug] PR process: merged outcome returned", flush=True)
+
+            print(
+                "[webhook-debug] PR webhook: check synchronization completed",
+                flush=True,
+            )
 
         # Synchronize GitHub reviews before building the feature snapshot.
         if payload.action in {
@@ -166,24 +209,45 @@ class PullRequestWebhookService:
                 "[webhook-debug] PR webhook: review synchronization completed",
                 flush=True,
             )
+
         # Build/update feature snapshot.
         if payload.action in SNAPSHOT_EVENTS:
-            print("[webhook-debug] PR process: snapshot started", flush=True)
+            print(
+                "[webhook-debug] PR process: snapshot started",
+                flush=True,
+            )
+
             self._feature_service.create_snapshot(
                 db=db,
                 pull_request=pull_request,
             )
-            print("[webhook-debug] PR process: snapshot returned", flush=True)
+
+            print(
+                "[webhook-debug] PR process: snapshot returned",
+                flush=True,
+            )
 
         # Evaluate the latest available outcome evidence.
-        print("[webhook-debug] PR process: final outcome started", flush=True)
+        print(
+            "[webhook-debug] PR process: final outcome started",
+            flush=True,
+        )
+
         evaluate_pull_request_outcome(
             db=db,
             pull_request_id=pull_request.id,
         )
-        print("[webhook-debug] PR process: final outcome returned", flush=True)
 
-        print("[webhook-debug] PR process: returning", flush=True)
+        print(
+            "[webhook-debug] PR process: final outcome returned",
+            flush=True,
+        )
+
+        print(
+            "[webhook-debug] PR process: returning",
+            flush=True,
+        )
+
         return pull_request
 
 

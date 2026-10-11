@@ -1,8 +1,6 @@
 from __future__ import annotations
 from ast import List
-from urllib import response
 
-from fastapi import requests
 import httpx
 from app.github.schemas import GitHubChangedFile, GitHubPullRequest
 from app.github.schemas import GitHubUser
@@ -173,18 +171,30 @@ class GitHubClient:
         ref: str,
     ) -> list[GitHubCheckRun]:
 
-        response = self._client.get(
-            f"/repos/{owner}/{repository}/commits/{ref}/check-runs",
-        )
+        endpoint = f"/repos/{owner}/{repository}/commits/{ref}/check-runs"
+        check_runs: list[GitHubCheckRun] = []
+        page = 1
 
-        response.raise_for_status()
+        while True:
+            response = self._client.get(
+                endpoint,
+                params={"per_page": 100, "page": page},
+            )
+            response.raise_for_status()
+            data = response.json()
+            batch = data.get("check_runs", [])
+            check_runs.extend(
+                GitHubCheckRun.model_validate(check_run)
+                for check_run in batch
+            )
 
-        data = response.json()
+            if len(check_runs) >= data.get("total_count", len(check_runs)):
+                break
+            if len(batch) < 100:
+                break
+            page += 1
 
-        return [
-            GitHubCheckRun.model_validate(check_run)
-            for check_run in data.get("check_runs", [])
-        ]
+        return check_runs
 
     def get_pull_request(
         self,
