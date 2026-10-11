@@ -1,0 +1,9 @@
+{
+  "total_rows": 128,
+  "label_distribution": {
+    "healthy": 78,
+    "problematic": 50
+  },
+  "duplicate_pr_ids": 0,
+  "duplicate_feature_vectors": 0
+}

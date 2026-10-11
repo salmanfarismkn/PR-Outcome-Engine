@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    BigInteger,
     ForeignKey,
     Index,
     String,
@@ -37,6 +38,7 @@ class Review(BaseModel):
     )
 
     github_id: Mapped[int] = mapped_column(
+        BigInteger,
         nullable=False,
     )
 

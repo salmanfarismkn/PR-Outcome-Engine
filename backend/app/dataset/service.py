@@ -12,7 +12,6 @@ class TrainingDatasetService:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
-
     def build_dataset(
         self,
         db: Session,
@@ -20,7 +19,9 @@ class TrainingDatasetService:
         outcomes = (
             db.query(PullRequestOutcome)
             .filter(
-                PullRequestOutcome.outcome.in_(["healthy", "problematic"])
+                PullRequestOutcome.outcome.in_(
+                    ["healthy", "problematic"]
+                )
             )
             .all()
         )
@@ -28,7 +29,10 @@ class TrainingDatasetService:
         dataset = []
 
         for outcome in outcomes:
-            if outcome.observed_at is None:
+
+            cutoff = outcome.merged_at or outcome.observed_at
+
+            if cutoff is None:
                 continue
 
             snapshots = (
@@ -37,18 +41,18 @@ class TrainingDatasetService:
                     PRFeatureSnapshot.pull_request_id
                     == outcome.pull_request_id
                 )
-                .order_by(PRFeatureSnapshot.created_at.asc())
+                .order_by(
+                    PRFeatureSnapshot.created_at.desc()
+                )
                 .all()
             )
 
-            # Choose the earliest complete snapshot recorded no later
-            # than the final outcome observation.
             snapshot = next(
                 (
                     item
                     for item in snapshots
                     if self._as_utc(item.created_at)
-                    <= self._as_utc(outcome.observed_at)
+                    <= self._as_utc(cutoff)
                     and item.commit_count > 0
                     and item.changed_files > 0
                 ),

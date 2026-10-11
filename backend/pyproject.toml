@@ -12,7 +12,7 @@ dependencies = [
     "alembic>=1.16",
     "pydantic-settings>=2.10",
     "httpx>=0.28.1",
-    "scikit-learn>=1.9.0",
+    "scikit-learn==1.7.2",
     "pandas>=3.0.5",
     "joblib>=1.6.0",
 ]

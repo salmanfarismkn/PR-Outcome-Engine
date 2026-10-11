@@ -32,6 +32,13 @@ class ReviewService:
 
             if review.id in existing_ids:
                 skipped += 1
+                print(
+                    "[review-import-debug] skipped review: "
+                    f"github_review_id={review.id}, "
+                    "reason=duplicate GitHub review ID already stored "
+                    f"for internal_pull_request_id={pull_request_id}",
+                    flush=True,
+                )
                 continue
 
             reviewer_login = (
@@ -39,6 +46,12 @@ class ReviewService:
                 if review.user
                 else "unknown"
             )
+            if review.user is None:
+                print(
+                    "[review-import-debug] reviewer missing; "
+                    f"using 'unknown' for github_review_id={review.id}",
+                    flush=True,
+                )
 
             db.add(
                 Review(
@@ -52,6 +65,13 @@ class ReviewService:
             )
 
             imported += 1
+            print(
+                "[review-import-debug] imported review: "
+                f"github_review_id={review.id}, "
+                f"state={review.state!r}, "
+                f"reviewer={reviewer_login!r}",
+                flush=True,
+            )
 
         db.commit()
 

@@ -149,15 +149,18 @@ class PRFeatureService:
         )
 
         created_at = pull_request.created_at
-        now = datetime.now(timezone.utc)
+        snapshot_at = datetime.now(timezone.utc)
+
+        if created_at and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
 
         age_hours = (
             max(
-                0,
-                (now - created_at).total_seconds() / 3600,
+                0.0,
+                (snapshot_at - created_at).total_seconds() / 3600,
             )
             if created_at
-            else 0
+            else 0.0
         )
 
         print(
@@ -184,7 +187,7 @@ class PRFeatureService:
             successful_checks=successful_checks,
             failed_checks=failed_checks,
             pending_checks=pending_checks,
-
+            created_at=snapshot_at,
             is_draft=getattr(
                 pull_request,
                 "draft",
@@ -259,7 +262,7 @@ class PRFeatureService:
             successful_checks=snapshot.successful_checks,
             failed_checks=snapshot.failed_checks,
             pending_checks=snapshot.pending_checks,
-
+            created_at=snapshot.created_at,
             is_draft=snapshot.is_draft,
 
             age_hours=snapshot.age_hours,

@@ -18,6 +18,7 @@ from app.feature.service import PRFeatureService
 from app.application.outcome_evaluation import (
     evaluate_pull_request_outcome,
 )
+from app.application.review_sync import ReviewSyncService
 
 SNAPSHOT_EVENTS = {
     "opened",
@@ -33,6 +34,7 @@ class PullRequestWebhookService:
         self._sync_service = PullRequestSyncService()
         self._outcome_service = OutcomeEvaluator()
         self._feature_service = PRFeatureService()
+        self._review_sync_service = ReviewSyncService()
 
 
     def process(
@@ -143,7 +145,27 @@ class PullRequestWebhookService:
             )
             print("[webhook-debug] PR process: merged outcome returned", flush=True)
 
+        # Synchronize GitHub reviews before building the feature snapshot.
+        if payload.action in {
+            "opened",
+            "reopened",
+            "synchronize",
+            "closed",
+        }:
+            print(
+                "[webhook-debug] PR webhook: review synchronization started",
+                flush=True,
+            )
 
+            self._review_sync_service.import_reviews(
+                db=db,
+                pull_request=pull_request,
+            )
+
+            print(
+                "[webhook-debug] PR webhook: review synchronization completed",
+                flush=True,
+            )
         # Build/update feature snapshot.
         if payload.action in SNAPSHOT_EVENTS:
             print("[webhook-debug] PR process: snapshot started", flush=True)
