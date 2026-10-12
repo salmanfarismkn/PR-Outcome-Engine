@@ -31,6 +31,15 @@ class CheckSyncService:
             repository=pull_request.repository.name,
             ref=github_pr.head.sha,
         )
+        check_runs = [
+            check_run
+            for check_run in check_runs
+            if not check_run.pull_requests
+            or any(
+                associated_pr.number == pull_request.number
+                for associated_pr in check_run.pull_requests
+            )
+        ]
 
         return self._check_service.import_check_runs(
             db=db,

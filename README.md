@@ -32,9 +32,24 @@ prediction immediately before merge and excludes post-merge snapshots.
 
 ## Prospective training data collection
 
-Keep the GitHub webhook configured for `pull_request` (`opened`, `reopened`,
-`synchronize`, and `closed`), `pull_request_review` (`submitted`, `edited`,
-and `dismissed`), and `check_run` (`created`, `rerequested`, and `completed`).
+Configure the repository webhook in **Settings > Webhooks > Add webhook**:
+
+1. Set the payload URL to the publicly reachable application URL ending in
+   `/webhooks/github` (for local testing, expose the local server through a
+   trusted tunnel).
+2. Set **Content type** to `application/json`, enable SSL verification, and
+   set a strong webhook secret. Put the same value in the backend's
+   `GITHUB_WEBHOOK_SECRET` environment variable; do not commit or share it.
+3. Select **Let me select individual events**, then enable **Pull requests**,
+   **Pull request reviews**, and **Check runs**. Keep all activity types for
+   those event families enabled, or at minimum include PR `opened`, `reopened`,
+   `synchronize`, `closed`; review `submitted`, `edited`, `dismissed`; and
+   check-run `created`, `rerequested`, `completed`.
+   Also enable **Pushes** if push-based revert detection is required.
+4. Save the webhook. Use GitHub's **Recent Deliveries** page to confirm that
+   `pull_request_review` deliveries reach `/webhooks/github` and receive a
+   successful response.
+
 Open/reopened/synchronized PRs sync commits and changed files before checks,
 reviews, feature snapshots, and outcome evaluation. Review/check events refresh
 their evidence and snapshot only while the PR is unmerged. A merged PR's

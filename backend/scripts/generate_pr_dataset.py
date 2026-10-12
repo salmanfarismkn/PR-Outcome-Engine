@@ -13,6 +13,92 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.github.service import GitHubService  # noqa: E402
 
 
+FAILED_CHECK_CONCLUSIONS = {
+    "failure",
+    "cancelled",
+    "timed_out",
+    "action_required",
+}
+
+
+def checks_for_pull_request(check_runs, pr_number: int, head_sha: str):
+    return [
+        check
+        for check in check_runs
+        if check.head_sha == head_sha
+        and (
+            not check.pull_requests
+            or any(
+                association.number == pr_number
+                for association in check.pull_requests
+            )
+        )
+    ]
+
+
+def healthy_scenario_check_state(check_runs) -> tuple[str, str | None]:
+    if not check_runs:
+        return "pending", None
+
+    failed = [
+        check
+        for check in check_runs
+        if check.status == "completed"
+        and check.conclusion is not None
+        and check.conclusion != "success"
+    ]
+    if failed:
+        details = ", ".join(
+            f"{check.name}={check.conclusion}"
+            for check in failed
+        )
+        return "failed", details
+
+    if all(
+        check.status == "completed"
+        and check.conclusion == "success"
+        for check in check_runs
+    ):
+        return "success", None
+    return "pending", None
+
+
+def prepare_scenario_marker(worktree_path: Path, scenario: str) -> None:
+    failure_marker = worktree_path / ".dataset-ci-failure"
+    if scenario == "ci_failure":
+        failure_marker.write_text(
+            "Intentional CI failure for PR Risk Analyzer dataset generation.\n",
+            encoding="utf-8",
+        )
+        run_git(
+            worktree_path,
+            "add",
+            "--",
+            ".dataset-ci-failure",
+        )
+    elif failure_marker.exists():
+        failure_marker.unlink()
+        run_git(
+            worktree_path,
+            "add",
+            "--update",
+            "--",
+            ".dataset-ci-failure",
+        )
+
+
+def validate_scenario_outcome(scenario: str, outcome: str | None) -> None:
+    expected_outcome = {
+        "healthy": "healthy",
+        "ci_failure": "problematic",
+    }[scenario]
+    if outcome != expected_outcome:
+        raise SystemExit(
+            f"Generated {scenario} PR finished with outcome "
+            f"{outcome!r}; expected {expected_outcome!r}."
+        )
+
+
 def run_git(repo_path: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -87,48 +173,18 @@ def wait_for_ci_failure(
         f"Waiting for CI failure evidence on PR #{pr_number}..."
     )
 
-    try:
-        pull_request = github.get_pull_request(
-            owner,
-            repo,
-            pr_number,
-        )
-    except (
-        httpx.HTTPStatusError,
-        httpx.RequestError,
-    ) as error:
-        raise report_github_error(
-            f"Could not read checks for PR #{pr_number}",
-            error,
-        ) from error
-
     with httpx.Client(timeout=10.0) as client:
         while time.monotonic() < deadline:
             try:
-                response = client.get(status_url)
-            except httpx.RequestError:
-                time.sleep(poll_interval_seconds)
-                continue
-
-            if response.status_code == 404:
-                time.sleep(poll_interval_seconds)
-                continue
-
-            response.raise_for_status()
-            status = response.json()
-
-            if status["failed_checks"] > 0:
-                print(
-                    f"CI failure confirmed: "
-                    f"failed_checks={status['failed_checks']}"
+                pull_request = github.get_pull_request(
+                    owner,
+                    repo,
+                    pr_number,
                 )
-                return status
-
-            try:
                 check_runs = github.list_check_runs(
                     owner,
                     repo,
-                    pull_request.head.ref,
+                    pull_request.head.sha,
                 )
             except (
                 httpx.HTTPStatusError,
@@ -139,20 +195,20 @@ def wait_for_ci_failure(
                     error,
                 ) from error
 
+            current_head_runs = checks_for_pull_request(
+                check_runs,
+                pr_number,
+                pull_request.head.sha,
+            )
             has_failed_check = any(
                 check.status == "completed"
-                and check.conclusion in {
-                    "failure",
-                    "cancelled",
-                    "timed_out",
-                    "action_required",
-                }
-                for check in check_runs
+                and check.conclusion in FAILED_CHECK_CONCLUSIONS
+                for check in current_head_runs
             )
             if has_failed_check:
                 print(
-                    "GitHub reports a completed failed check; "
-                    "syncing checks to the backend..."
+                    "GitHub reports a completed failed check on the "
+                    "current PR head; syncing checks to the backend..."
                 )
                 try:
                     import_response = client.post(import_url)
@@ -172,7 +228,10 @@ def wait_for_ci_failure(
                 response = client.get(status_url)
                 response.raise_for_status()
                 status = response.json()
-                if status["failed_checks"] > 0:
+                if (
+                    status["head_sha"] == pull_request.head.sha
+                    and status["failed_checks"] > 0
+                ):
                     print(
                         f"CI failure confirmed: "
                         f"failed_checks={status['failed_checks']}"
@@ -185,6 +244,106 @@ def wait_for_ci_failure(
         f"Timed out waiting for CI failure "
         f"on PR #{pr_number}."
     )
+
+
+def wait_for_ci_success(
+    *,
+    github: GitHubService,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    pull_request_id: int,
+    timeout_seconds: int = 180,
+    poll_interval_seconds: int = 3,
+) -> dict:
+    deadline = time.monotonic() + timeout_seconds
+    status_url = (
+        f"{BACKEND_URL}/dataset/pr/github/"
+        f"{owner}/{repo}/{pr_number}/status"
+    )
+    import_url = (
+        f"{BACKEND_URL}/check-runs/import/{pull_request_id}"
+    )
+
+    print(
+        f"Waiting for all current-head checks to succeed on PR #{pr_number}..."
+    )
+
+    with httpx.Client(timeout=10.0) as client:
+        while time.monotonic() < deadline:
+            try:
+                pull_request = github.get_pull_request(
+                    owner,
+                    repo,
+                    pr_number,
+                )
+                check_runs = github.list_check_runs(
+                    owner,
+                    repo,
+                    pull_request.head.sha,
+                )
+            except (
+                httpx.HTTPStatusError,
+                httpx.RequestError,
+            ) as error:
+                raise report_github_error(
+                    f"Could not read checks for PR #{pr_number}",
+                    error,
+                ) from error
+
+            current_head_runs = checks_for_pull_request(
+                check_runs,
+                pr_number,
+                pull_request.head.sha,
+            )
+            state, details = healthy_scenario_check_state(current_head_runs)
+            if state == "failed":
+                raise SystemExit(
+                    f"Healthy scenario blocked for PR #{pr_number}: "
+                    f"current-head checks did not succeed ({details}). "
+                    "The PR was not merged."
+                )
+
+            if state == "success":
+                try:
+                    import_response = client.post(import_url)
+                    import_response.raise_for_status()
+                    response = client.get(status_url)
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as error:
+                    raise SystemExit(
+                        "Could not verify synchronized current-head checks "
+                        f"for PR #{pr_number}: HTTP "
+                        f"{error.response.status_code} "
+                        f"({error.response.reason_phrase})."
+                    ) from error
+                except httpx.RequestError as error:
+                    raise SystemExit(
+                        "Could not verify synchronized current-head checks "
+                        f"for PR #{pr_number}: {error}"
+                    ) from error
+
+                status = response.json()
+                if (
+                    status["head_sha"] == pull_request.head.sha
+                    and status["check_count"] > 0
+                    and status["successful_checks"] > 0
+                    and status["failed_checks"] == 0
+                    and status["pending_checks"] == 0
+                ):
+                    print(
+                        f"Current-head CI success confirmed: "
+                        f"checks={status['check_count']}"
+                    )
+                    return status
+
+            time.sleep(poll_interval_seconds)
+
+    raise SystemExit(
+        f"Timed out waiting for all current-head checks to succeed "
+        f"on PR #{pr_number}. The PR was not merged."
+    )
+
 
 BACKEND_URL = "http://127.0.0.1:8000"
 
@@ -365,21 +524,7 @@ def generate_one_pr(
                 ],
             )
 
-            # Add the CI-failure marker only for the problematic scenario.
-            if scenario == "ci_failure":
-                failure_marker = worktree_path / ".dataset-ci-failure"
-
-                failure_marker.write_text(
-                    "Intentional CI failure for PR Risk Analyzer dataset generation.\n",
-                    encoding="utf-8",
-                )
-
-                run_git(
-                    worktree_path,
-                    "add",
-                    "--",
-                    ".dataset-ci-failure",
-                )
+            prepare_scenario_marker(worktree_path, scenario)
 
             run_git(
                 worktree_path,
@@ -556,6 +701,14 @@ def generate_one_pr(
                 print(
                     "Problematic CI evidence confirmed."
                 )
+            elif scenario == "healthy":
+                status = wait_for_ci_success(
+                    github=github,
+                    owner=owner,
+                    repo=repository,
+                    pr_number=pr.number,
+                    pull_request_id=status["pull_request_id"],
+                )
 
             print(
                 "PR processing confirmed: "
@@ -593,6 +746,10 @@ def generate_one_pr(
                 repo=repository,
                 pr_number=pr.number,
                 require_merged=True,
+            )
+            validate_scenario_outcome(
+                scenario,
+                status["outcome"],
             )
 
             print()

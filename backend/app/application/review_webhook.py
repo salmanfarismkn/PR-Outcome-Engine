@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.pull_request.models import PullRequest
+from app.repository.models import Repository
 from app.review.models import Review
 from app.webhook.schemas import (
     PullRequestReviewWebhookPayload,
@@ -33,8 +34,11 @@ class ReviewWebhookService:
         github_review = payload.review
 
         pull_request = db.scalar(
-            select(PullRequest).where(
-                PullRequest.github_id == github_pr.id
+            select(PullRequest)
+            .join(PullRequest.repository)
+            .where(
+                PullRequest.github_id == github_pr.id,
+                Repository.github_id == payload.repository.id,
             )
         )
 
@@ -61,6 +65,11 @@ class ReviewWebhookService:
             )
             db.add(review)
         else:
+            if review.pull_request_id != pull_request.id:
+                raise ValueError(
+                    "GitHub review is already associated with a "
+                    "different pull request."
+                )
             review.pull_request_id = pull_request.id
             review.reviewer_login = github_review.user.login
             review.state = github_review.state
@@ -71,10 +80,11 @@ class ReviewWebhookService:
         db.refresh(review)
 
         
-        self._feature_service.create_snapshot(
-            db=db,
-            pull_request=pull_request,
-        )
+        if not pull_request.merged and pull_request.state == "open":
+            self._feature_service.create_snapshot(
+                db=db,
+                pull_request=pull_request,
+            )
 
         evaluate_pull_request_outcome(
             db=db,
