@@ -47,7 +47,7 @@ class GitHubPullRequestUser(BaseModel):
 
 class GitHubPullRequestBranch(BaseModel):
     ref: str
-
+    sha: str
 
 class GitHubPullRequest(BaseModel):
     id: int
@@ -106,6 +106,7 @@ class GitHubReview(BaseModel):
 class GitHubCheckRun(BaseModel):
     id: int
     name: str
+    head_sha: str
     status: str
     conclusion: str | None
     details_url: str | None

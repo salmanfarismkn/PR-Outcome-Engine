@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GitHubWebhookRepository(BaseModel):
@@ -76,6 +76,14 @@ class PullRequestReviewWebhookPayload(BaseModel):
         extra="ignore",
     )
 
+class GitHubCheckRunPullRequest(BaseModel):
+    number: int
+
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+
+
 class GitHubCheckRunWebhook(BaseModel):
     id: int
     name: str
@@ -89,6 +97,10 @@ class GitHubCheckRunWebhook(BaseModel):
     completed_at: datetime | None
 
     head_sha: str
+
+    pull_requests: list["GitHubCheckRunPullRequest"] = Field(
+        default_factory=list,
+    )
 
     model_config = ConfigDict(
         extra="ignore",

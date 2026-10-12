@@ -5,8 +5,15 @@ from sqlalchemy.orm import Session
 from app.check.models import CheckRun
 from app.outcome.models import PullRequestOutcome
 from app.pull_request.models import PullRequest
-from app.review.models import Review
 from app.outcome.revert_models import RevertEvent
+
+
+FAILED_CONCLUSIONS = {
+    "failure",
+    "timed_out",
+    "action_required",
+}
+
 
 class OutcomeEvaluator:
 
@@ -82,46 +89,22 @@ class OutcomeEvaluator:
             flush=True,
         )
 
-        failed_checks = 0
-
-        for check in checks:
-            conclusion = getattr(
-                check,
-                "conclusion",
-                None,
-            )
-
-            if conclusion in {
-                "failure",
-                "cancelled",
-                "timed_out",
-                "action_required",
-            }:
-                failed_checks += 1
-
-        # -----------------------------------------
-        # Review evidence
-        # -----------------------------------------
-
-        print("[webhook-debug] outcome: reviews query started", flush=True)
-        reviews = (
-            db.query(Review)
-            .filter(
-                Review.pull_request_id == pull_request.id
-            )
-            .all()
-        )
-        print(
-            "[webhook-debug] outcome: reviews query returned; "
-            f"count={len(reviews)}",
-            flush=True,
-        )
-
-        change_requests = sum(
-            1
-            for review in reviews
-            if getattr(review, "state", None)
-            == "CHANGES_REQUESTED"
+        current_head_checks = [
+            check
+            for check in checks
+            if pull_request.head_sha
+            and check.head_sha == pull_request.head_sha
+        ]
+        failed_checks = [
+            check
+            for check in current_head_checks
+            if check.status == "completed"
+            and check.conclusion in FAILED_CONCLUSIONS
+        ]
+        all_checks_succeeded = bool(current_head_checks) and all(
+            check.status == "completed"
+            and check.conclusion == "success"
+            for check in current_head_checks
         )
         # -----------------------------------------
         # Revert evidence
@@ -150,17 +133,32 @@ class OutcomeEvaluator:
             outcome.outcome = "problematic"
             outcome.reason = "PR was later reverted"
 
-        elif failed_checks > 0:
+        elif failed_checks:
             outcome.outcome = "problematic"
-            outcome.reason = "Merged PR had CI failures"
+            outcome.reason = (
+                "Current PR head has a completed failing CI check"
+            )
 
-        elif change_requests > 0:
-            outcome.outcome = "problematic"
-            outcome.reason = "Merged PR had requested changes"
+        elif all_checks_succeeded:
+            outcome.outcome = "healthy"
+            outcome.reason = (
+                "Current PR head has completed successful CI checks "
+                "and no verified revert"
+            )
 
         else:
-            outcome.outcome = "healthy"
-            outcome.reason = "Merged without detected problems"
+            outcome.outcome = "uncertain"
+            if not pull_request.head_sha:
+                outcome.reason = "Current PR head SHA is unavailable"
+            elif not current_head_checks:
+                outcome.reason = (
+                    "No CI evidence is recorded for the current PR head"
+                )
+            else:
+                outcome.reason = (
+                    "Current PR head does not have exclusively completed "
+                    "successful CI checks"
+                )
 
         outcome.observed_at = datetime.now(timezone.utc)
 

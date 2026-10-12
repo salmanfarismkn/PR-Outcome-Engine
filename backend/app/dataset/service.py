@@ -27,12 +27,14 @@ class TrainingDatasetService:
         )
 
         dataset = []
+        seen_pull_request_ids: set[int] = set()
 
         for outcome in outcomes:
-
-            cutoff = outcome.merged_at or outcome.observed_at
-
-            if cutoff is None:
+            # Training predicts immediately before merge, so only the merge
+            # timestamp is a safe cutoff for the selected historical features.
+            if outcome.merged_at is None:
+                continue
+            if outcome.pull_request_id in seen_pull_request_ids:
                 continue
 
             snapshots = (
@@ -52,7 +54,7 @@ class TrainingDatasetService:
                     item
                     for item in snapshots
                     if self._as_utc(item.created_at)
-                    <= self._as_utc(cutoff)
+                    <= self._as_utc(outcome.merged_at)
                     and item.commit_count > 0
                     and item.changed_files > 0
                 ),
@@ -61,6 +63,7 @@ class TrainingDatasetService:
 
             if snapshot is None:
                 continue
+            seen_pull_request_ids.add(outcome.pull_request_id)
 
             dataset.append(
                 {

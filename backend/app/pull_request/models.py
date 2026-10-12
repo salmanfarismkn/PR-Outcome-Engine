@@ -93,6 +93,11 @@ class PullRequest(BaseModel):
         String(100), nullable=False, server_default="unknown"
     )
 
+    head_sha: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
 
     is_draft: Mapped[bool] = mapped_column(
         Boolean,
