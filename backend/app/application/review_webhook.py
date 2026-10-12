@@ -11,6 +11,7 @@ from app.webhook.schemas import (
 )
 from app.feature.service import PRFeatureService
 from app.application.outcome_evaluation import evaluate_pull_request_outcome
+from app.webhook.exceptions import WebhookDependencyPending
 
 class ReviewWebhookService:
 
@@ -33,19 +34,28 @@ class ReviewWebhookService:
         github_pr = payload.pull_request
         github_review = payload.review
 
+        repository = db.scalar(
+            select(Repository).where(
+                Repository.github_id == payload.repository.id
+            )
+        )
+        if repository is None:
+            raise ValueError(
+                "Repository from review webhook has not been synchronized."
+            )
+
         pull_request = db.scalar(
             select(PullRequest)
-            .join(PullRequest.repository)
             .where(
                 PullRequest.github_id == github_pr.id,
-                Repository.github_id == payload.repository.id,
+                PullRequest.repository_id == repository.id,
             )
         )
 
         if pull_request is None:
-            raise ValueError(
+            raise WebhookDependencyPending(
                 "Pull request from review webhook "
-                "does not exist locally."
+                "has not been synchronized yet."
             )
 
         review = db.scalar(

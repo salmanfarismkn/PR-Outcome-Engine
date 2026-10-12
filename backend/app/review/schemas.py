@@ -21,5 +21,6 @@ class ReviewResponse(BaseModel):
 
 class ReviewImportSummary(BaseModel):
     imported: int
+    updated: int = 0
     skipped: int
     total: int

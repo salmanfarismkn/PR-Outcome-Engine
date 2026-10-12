@@ -132,37 +132,42 @@ class GitHubClient:
         endpoint = (
             f"/repos/{owner}/{repository}/pulls/{pull_number}/reviews"
         )
-        print(
-            f"[review-import-debug] GET {self._client.base_url.join(endpoint)}",
-            flush=True,
-        )
-        response = self._client.get(
-            endpoint,
-        )
-        print(
-            "[review-import-debug] GitHub reviews response: "
-            f"status={response.status_code}, "
-            f"url={response.request.url}",
-            flush=True,
-        )
+        reviews: list[GitHubReview] = []
+        page = 1
 
-        response.raise_for_status()
-        raw_reviews = response.json()
-        raw_count = (
-            len(raw_reviews)
-            if isinstance(raw_reviews, list)
-            else "non-list response"
-        )
-        print(
-            "[review-import-debug] raw GitHub review count: "
-            f"{raw_count}",
-            flush=True,
-        )
+        while True:
+            response = self._client.get(
+                endpoint,
+                params={"per_page": 100, "page": page},
+            )
+            print(
+                "[review-import-debug] GitHub reviews response: "
+                f"status={response.status_code}, "
+                f"url={response.request.url}",
+                flush=True,
+            )
+            response.raise_for_status()
+            raw_reviews = response.json()
+            if not isinstance(raw_reviews, list):
+                raise ValueError(
+                    "GitHub reviews endpoint returned a non-list response."
+                )
 
-        return [
-            GitHubReview.model_validate(review)
-            for review in raw_reviews
-        ]
+            print(
+                "[review-import-debug] raw GitHub review count: "
+                f"{len(raw_reviews)} page={page}",
+                flush=True,
+            )
+            reviews.extend(
+                GitHubReview.model_validate(review)
+                for review in raw_reviews
+            )
+
+            if len(raw_reviews) < 100:
+                break
+            page += 1
+
+        return reviews
 
     def list_check_runs(
         self,

@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.feature.models import PRFeatureSnapshot
 from app.outcome.models import PullRequestOutcome
+from app.pull_request.models import PullRequest
 from datetime import datetime, timezone
 
 class TrainingDatasetService:
@@ -25,6 +26,21 @@ class TrainingDatasetService:
             )
             .all()
         )
+
+        pull_request_ids = {
+            outcome.pull_request_id for outcome in outcomes
+        }
+        pull_requests = (
+            db.query(PullRequest)
+            .filter(PullRequest.id.in_(pull_request_ids))
+            .all()
+            if pull_request_ids
+            else []
+        )
+        repository_ids = {
+            pull_request.id: pull_request.repository_id
+            for pull_request in pull_requests
+        }
 
         dataset = []
         seen_pull_request_ids: set[int] = set()
@@ -68,6 +84,9 @@ class TrainingDatasetService:
             dataset.append(
                 {
                     "pull_request_id": snapshot.pull_request_id,
+                    "repository_id": repository_ids.get(
+                        outcome.pull_request_id
+                    ),
                     "additions": snapshot.additions,
                     "deletions": snapshot.deletions,
                     "changed_files": snapshot.changed_files,

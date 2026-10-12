@@ -58,10 +58,23 @@ training snapshot.
 
 Snapshot creation skips closed/merged PRs and incomplete source records. Webhook
 processing failures are recorded as failed or pending deliveries; inspect the
-webhook event status and application logs when an event does not complete.
+webhook event status and application logs when an event does not complete. A
+review delivery that arrives before its PR is ingested stays pending and is
+retried when the matching PR webhook is processed; it is not discarded.
 Do not backdate or manually create pre-merge snapshots for historical PRs.
-Periodically run `uv run python scripts/evaluate_pr_dataset.py` from
-`backend/`. It reports dataset eligibility and performs non-persisting
-evaluation; it reports `not_evaluable` until the eligible data has both
-outcome classes and enough PRs for the grouped split. This command does not
-save or retrain a model.
+
+From `backend/`, periodically run
+`uv run python scripts/audit_training_readiness.py`. This read-only audit
+reports eligible rows by outcome, repository, and pre-merge snapshot
+completeness, plus repository-grouped partition class counts when a valid split
+is possible. It does not fit or save a model. Evaluation requires at least 30
+eligible examples and healthy and problematic examples represented in at least
+two repositories each; a single-repository dataset is reported
+`not_evaluable`.
+
+When the audit reports a valid repository-grouped split, run
+`uv run python scripts/evaluate_pr_dataset.py` to calculate non-persisting
+evaluation metrics. That command fits only an in-memory evaluation model and
+does not save a model artifact. Continue collecting prospective examples if
+either command reports `not_evaluable`; do not backdate snapshots or weaken
+evidence requirements to force evaluation.

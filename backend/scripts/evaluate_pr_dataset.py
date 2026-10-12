@@ -48,6 +48,119 @@ def evaluate_dataset(dataset: list[dict]) -> dict:
     }
 
 
+def build_readiness_report(
+    dataset: list[dict],
+    outcome_audits: list[dict],
+    evaluation: dict,
+) -> dict:
+    eligible_by_group = Counter(
+        (
+            row["repository_id"],
+            row["label"],
+        )
+        for row in dataset
+    )
+    outcomes_by_group: dict[tuple[str, str], Counter] = defaultdict(Counter)
+    for item in outcome_audits:
+        counts = outcomes_by_group[
+            (item["repository"], item["outcome"])
+        ]
+        counts["outcomes"] += 1
+        if item["eligible_snapshot_count"]:
+            counts["complete_premerge_snapshot"] += 1
+        else:
+            counts["missing_complete_premerge_snapshot"] += 1
+
+    repository_names_by_id = {
+        item["repository_id"]: item["repository"]
+        for item in outcome_audits
+    }
+    repository_ids_by_name = {
+        repository: repository_id
+        for repository_id, repository in repository_names_by_id.items()
+    }
+    eligible_groups = []
+    for (repository_id, outcome), count in sorted(eligible_by_group.items()):
+        eligible_groups.append(
+            {
+                "repository_id": repository_id,
+                "repository": repository_names_by_id.get(repository_id),
+                "outcome": outcome,
+                "eligible_rows": count,
+                "complete_premerge_snapshot_rows": count,
+            }
+        )
+
+    outcome_groups = [
+        {
+            "repository": repository,
+            "outcome": outcome,
+            **dict(counts),
+            "eligible_training_rows": eligible_by_group.get(
+                (
+                    repository_ids_by_name.get(repository),
+                    outcome,
+                ),
+                0,
+            ),
+        }
+        for (repository, outcome), counts in sorted(
+            outcomes_by_group.items()
+        )
+    ]
+
+    partitions = None
+    if evaluation["evaluation_status"] == "evaluated":
+        metrics = evaluation["evaluation"]["metrics"]
+        partitions = {
+            "training": metrics["training_class_distribution"],
+            "testing": metrics["testing_class_distribution"],
+        }
+        for distribution in partitions.values():
+            distribution["single_class"] = (
+                distribution["healthy"] == 0
+                or distribution["problematic"] == 0
+            )
+
+    class_repository_counts = {
+        label: len(
+            {
+                row["repository_id"]
+                for row in dataset
+                if row["label"] == label
+            }
+        )
+        for label in ("healthy", "problematic")
+    }
+    return {
+        "eligible_rows_by_repository_and_outcome": eligible_groups,
+        "outcome_snapshot_eligibility_by_repository_and_outcome": (
+            outcome_groups
+        ),
+        "repository_count": len(
+            {row["repository_id"] for row in dataset}
+        ),
+        "repositories_per_eligible_class": class_repository_counts,
+        "repository_diversity_sufficient": all(
+            count >= 2 for count in class_repository_counts.values()
+        ),
+        "evaluation_partitions": partitions,
+        "evaluation_partitions_unavailable_reason": (
+            evaluation.get("evaluation_reason")
+            if partitions is None
+            else None
+        ),
+        "single_class_partition_warning": (
+            any(
+                counts["single_class"]
+                for counts in partitions.values()
+            )
+            if partitions is not None
+            else None
+        ),
+    }
+
+
 def _check_counts(checks: list[CheckRun]) -> dict[str, int]:
     return {
         "total": len(checks),
@@ -163,6 +276,7 @@ def main() -> None:
             {
                 "outcome": outcome.outcome,
                 "internal_pr_id": pull_request.id,
+                "repository_id": pull_request.repository_id,
                 "github_pr_number": pull_request.number,
                 "repository": f"{repository.owner}/{repository.name}",
                 "title": pull_request.title,
@@ -282,7 +396,13 @@ def main() -> None:
         "problematic_summary_by_reason_and_eligibility": problematic_summary,
     }
 
-    report.update(evaluate_dataset(dataset))
+    evaluation = evaluate_dataset(dataset)
+    report.update(evaluation)
+    report["dataset_readiness"] = build_readiness_report(
+        dataset,
+        outcome_audits,
+        evaluation,
+    )
 
     print(json.dumps(report, indent=2, default=str))
     if report["evaluation_status"] == "not_evaluable":

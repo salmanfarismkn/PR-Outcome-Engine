@@ -6,6 +6,7 @@ import app.main  # noqa: F401
 from app.dataset.service import TrainingDatasetService
 from app.feature.models import PRFeatureSnapshot
 from app.outcome.models import PullRequestOutcome
+from app.pull_request.models import PullRequest
 
 
 def _snapshot(created_at: datetime, additions: int) -> SimpleNamespace:
@@ -58,15 +59,22 @@ def test_training_uses_latest_premerge_snapshot_once_per_pr() -> None:
         _snapshot(merged_at - timedelta(seconds=1), additions=7),
         _snapshot(merged_at - timedelta(days=1), additions=3),
     ]
+    pull_requests_query = Mock()
+    pull_requests_query.filter.return_value.all.return_value = [
+        SimpleNamespace(id=174, repository_id=10),
+        SimpleNamespace(id=175, repository_id=10),
+    ]
     db = Mock()
     db.query.side_effect = {
         PullRequestOutcome: outcomes_query,
         PRFeatureSnapshot: snapshots_query,
+        PullRequest: pull_requests_query,
     }.get
 
     dataset = TrainingDatasetService().build_dataset(db)
 
     assert len(dataset) == 1
     assert dataset[0]["pull_request_id"] == 174
+    assert dataset[0]["repository_id"] == 10
     assert dataset[0]["additions"] == 7
     assert dataset[0]["label"] == "healthy"

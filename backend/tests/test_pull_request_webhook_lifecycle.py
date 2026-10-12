@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import app.main  # noqa: F401
+import pytest
 from app.application import pull_request_webhook
 
 
@@ -53,6 +54,11 @@ def _service(monkeypatch, calls: list[str]):
     service._review_sync_service = Mock(
         import_reviews=lambda **_: calls.append("review_sync")
     )
+    service._webhook_retry_service = Mock(
+        retry_pending_review_events=lambda **_: calls.append(
+            "retry_deferred_reviews"
+        )
+    )
     service._feature_service = Mock(
         create_snapshot=lambda **_: calls.append("snapshot")
     )
@@ -75,6 +81,7 @@ def test_opened_pr_syncs_sources_and_evidence_before_snapshot_and_outcome(
     assert calls.index("source_sync") < calls.index("check_sync")
     assert calls.index("source_sync") < calls.index("review_sync")
     assert calls.index("check_sync") < calls.index("snapshot")
+    assert calls.index("retry_deferred_reviews") < calls.index("review_sync")
     assert calls.index("review_sync") < calls.index("snapshot")
     assert calls.index("snapshot") < calls.index("outcome")
 
@@ -93,3 +100,26 @@ def test_merged_closed_pr_evaluates_evidence_without_creating_snapshot(
     assert "source_sync" not in calls
     assert "snapshot" not in calls
 
+
+def test_failed_deferred_review_retry_stops_snapshot_and_outcome(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    service, db = _service(monkeypatch, calls)
+    retry_reviews = Mock(
+        side_effect=RuntimeError("review replay failed")
+    )
+    service._webhook_retry_service.retry_pending_review_events = retry_reviews
+
+    with pytest.raises(RuntimeError, match="review replay failed"):
+        service.process(db, _payload("opened"))
+
+    retry_reviews.assert_called_once()
+    assert retry_reviews.call_args.kwargs["db"] is db
+    assert retry_reviews.call_args.kwargs["pull_request"].id == 174
+    assert "source_sync" in calls
+    assert "check_sync" in calls
+    assert "retry_deferred_reviews" not in calls
+    assert "review_sync" not in calls
+    assert "snapshot" not in calls
+    assert "outcome" not in calls
