@@ -48,6 +48,7 @@ class ReviewSyncService:
         print(
             "[review-import-debug] import complete: "
             f"imported={summary.imported}, "
+            f"updated={summary.updated}, "
             f"skipped={summary.skipped}, "
             f"total={summary.total}",
             flush=True,

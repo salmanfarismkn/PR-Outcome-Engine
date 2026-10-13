@@ -82,6 +82,12 @@ def get_pr_dataset_status(
         )
         .all()
     )
+    current_head_check_runs = [
+        check
+        for check in check_runs
+        if pull_request.head_sha
+        and check.head_sha == pull_request.head_sha
+    ]
 
     return {
         "pull_request_id": pull_request.id,
@@ -89,6 +95,7 @@ def get_pr_dataset_status(
         "number": pull_request.number,
         "merged": pull_request.merged,
         "state": pull_request.state,
+        "head_sha": pull_request.head_sha,
         "snapshot_created": snapshot is not None,
         "outcome_created": outcome is not None,
         "lifecycle_status": (
@@ -101,15 +108,15 @@ def get_pr_dataset_status(
             if outcome is not None
             else None
         ),
-        "check_count": len(check_runs),
+        "check_count": len(current_head_check_runs),
         "successful_checks": sum(
             1
-            for check in check_runs
+            for check in current_head_check_runs
             if check.conclusion == "success"
         ),
         "failed_checks": sum(
             1
-            for check in check_runs
+            for check in current_head_check_runs
             if check.conclusion in {
                 "failure",
                 "cancelled",
@@ -119,7 +126,7 @@ def get_pr_dataset_status(
         ),
         "pending_checks": sum(
             1
-            for check in check_runs
+            for check in current_head_check_runs
             if check.status != "completed"
         ),
     }

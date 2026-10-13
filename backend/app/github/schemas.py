@@ -1,7 +1,6 @@
-from pydantic import BaseModel
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class GitHubOwner(BaseModel):
     id: int
@@ -103,6 +102,10 @@ class GitHubReview(BaseModel):
     submitted_at: datetime | None
 
 
+class GitHubCheckRunPullRequest(BaseModel):
+    number: int
+
+
 class GitHubCheckRun(BaseModel):
     id: int
     name: str
@@ -112,3 +115,6 @@ class GitHubCheckRun(BaseModel):
     details_url: str | None
     started_at: datetime | None
     completed_at: datetime | None
+    pull_requests: list[GitHubCheckRunPullRequest] = Field(
+        default_factory=list,
+    )

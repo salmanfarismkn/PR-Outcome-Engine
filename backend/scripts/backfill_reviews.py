@@ -20,6 +20,7 @@ def main() -> None:
     processed = 0
     failed = 0
     imported_reviews = 0
+    updated_reviews = 0
     skipped_reviews = 0
     total_reviews = 0
     snapshots_refreshed = 0
@@ -39,6 +40,7 @@ def main() -> None:
                 )
 
                 imported_reviews += result.imported
+                updated_reviews += result.updated
                 skipped_reviews += result.skipped
                 total_reviews += result.total
 
@@ -52,10 +54,11 @@ def main() -> None:
 
                 logger.info(
                     "Processed PR id=%s number=%s: "
-                    "imported=%d skipped=%d total=%d",
+                    "imported=%d updated=%d skipped=%d total=%d",
                     pull_request.id,
                     pull_request.number,
                     result.imported,
+                    result.updated,
                     result.skipped,
                     result.total,
                 )
@@ -71,12 +74,14 @@ def main() -> None:
 
     logger.info(
         "Backfill complete: processed=%d snapshots_refreshed=%d "
-        "failed=%d imported_reviews=%d skipped_reviews=%d "
+        "failed=%d imported_reviews=%d updated_reviews=%d "
+        "skipped_reviews=%d "
         "reviews_seen=%d",
         processed,
         snapshots_refreshed,
         failed,
         imported_reviews,
+        updated_reviews,
         skipped_reviews,
         total_reviews,
     )

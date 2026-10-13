@@ -15,6 +15,7 @@ from app.application.outcome_evaluation import (
 )
 from app.application.review_sync import ReviewSyncService
 from app.application.check_sync import CheckSyncService
+from app.application.webhook_retry import WebhookRetryService
 
 SNAPSHOT_EVENTS = {
     "opened",
@@ -29,6 +30,7 @@ class PullRequestWebhookService:
         self._feature_service = PRFeatureService()
         self._review_sync_service = ReviewSyncService()
         self._check_sync_service = CheckSyncService()
+        self._webhook_retry_service = WebhookRetryService()
 
     def process(
         self,
@@ -195,6 +197,16 @@ class PullRequestWebhookService:
             "synchronize",
             "closed",
         }:
+            print(
+                "[webhook-debug] PR webhook: retrying deferred reviews",
+                flush=True,
+            )
+
+            self._webhook_retry_service.retry_pending_review_events(
+                db=db,
+                pull_request=pull_request,
+            )
+
             print(
                 "[webhook-debug] PR webhook: review synchronization started",
                 flush=True,
