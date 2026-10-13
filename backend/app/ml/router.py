@@ -11,11 +11,19 @@ from sqlalchemy import select
 from app.feature.models import PRFeatureSnapshot
 from app.pull_request.models import PullRequest
 from app.ml.schemas import PRRiskPredictionResponse
+from app.api.dependencies import require_admin_access, require_read_access
 
-router = APIRouter(prefix="/ml", tags=["Machine Learning"])
+router = APIRouter(
+    prefix="/ml",
+    tags=["Machine Learning"],
+    dependencies=[Depends(require_read_access)],
+)
 
 
-@router.post("/train")
+@router.post(
+    "/train",
+    dependencies=[Depends(require_admin_access)],
+)
 def train_pr_risk_model(
     db: Session = Depends(get_db),
 ):

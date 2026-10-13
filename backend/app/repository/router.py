@@ -9,6 +9,7 @@ from app.repository.schemas import (
     RepositoryResponse,
 )
 from app.repository.service import RepositoryService
+from app.api.dependencies import require_admin_access
 
 router = APIRouter(
     prefix="/repositories",
@@ -23,6 +24,7 @@ repository_service = RepositoryService()
     "",
     response_model=RepositoryResponse,
     status_code=HTTPStatus.CREATED,
+    dependencies=[Depends(require_admin_access)],
 )
 def create(
     payload: RepositoryCreate,

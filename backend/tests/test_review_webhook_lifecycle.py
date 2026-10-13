@@ -158,6 +158,11 @@ def test_webhook_signature_uses_sha256_hmac() -> None:
         "sha256=invalid",
         secret,
     )
+    assert not WebhookService.verify_signature(
+        payload,
+        f"sha256={digest}",
+        "",
+    )
 
 
 def test_review_webhook_defers_when_pr_has_not_been_ingested() -> None:
@@ -168,11 +173,14 @@ def test_review_webhook_defers_when_pr_has_not_been_ingested() -> None:
         ReviewWebhookService().process(db, _payload())
 
 
-def test_review_webhook_does_not_defer_unknown_repository() -> None:
+def test_review_webhook_defers_when_repository_has_not_been_ingested() -> None:
     db = Mock()
     db.scalar.return_value = None
 
-    with pytest.raises(ValueError, match="Repository from review webhook"):
+    with pytest.raises(
+        WebhookDependencyPending,
+        match="Repository from review webhook",
+    ):
         ReviewWebhookService().process(db, _payload())
 
 

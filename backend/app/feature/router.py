@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.feature.schemas import PRFeatureSnapshot
 from app.feature.service import PRFeatureService
 from app.pull_request.models import PullRequest
+from app.api.dependencies import require_admin_access
 
 
 router = APIRouter(
@@ -43,6 +44,7 @@ def get_pull_request_features(
 
 @router.post(
     "/pull-request/{pull_request_id}/snapshot",
+    dependencies=[Depends(require_admin_access)],
 )
 def create_pull_request_snapshot(
     pull_request_id: int,

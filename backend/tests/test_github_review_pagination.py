@@ -51,6 +51,17 @@ def test_list_reviews_fetches_all_pages() -> None:
     assert [review.id for review in reviews] == list(range(1, 102))
 
 
+def test_client_uses_configured_token_for_authorization() -> None:
+    client = GitHubClient(
+        base_url="https://api.github.com",
+        token="test-token",
+    )
+    try:
+        assert client._client.headers["Authorization"] == "Bearer test-token"
+    finally:
+        client.close()
+
+
 def test_list_reviews_handles_empty_response() -> None:
     client = _client(
         lambda request: httpx.Response(200, json=[], request=request)

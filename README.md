@@ -2,6 +2,54 @@
 
 This repository has been scaffolded with the requested project structure.
 
+## API authentication
+
+The backend requires two distinct, high-entropy bearer credentials:
+
+- `API_READ_TOKEN` grants read-only access.
+- `API_ADMIN_TOKEN` grants read access plus administrative operations.
+
+Set both in the backend process environment or in a local, untracked
+`backend/.env` file based on `backend/.env.example`. Replace the placeholders
+with different randomly generated secrets (for example, from a password
+manager). Never commit, print, or log the configured values. If either value
+is missing/empty or the two values are identical, protected API requests fail
+closed with a server configuration error.
+
+All business/data routes require bearer authentication:
+
+- **Read token or admin token:** `GET /github/me`, `GET /repositories`,
+  `GET /pull-requests/{pull_request_id}`, `GET /analysis/{pull_request_id}`,
+  `GET /risk/pull-request/{pull_request_id}` and
+  `GET /risk/pull-request/{pull_request_id}/history`,
+  `GET /features/pull-request/{pull_request_id}`,
+  `GET /dataset/training`,
+  `GET /dataset/pr/github/{owner}/{repo}/{pr_number}/status`, and
+  `POST /ml/predict/{pull_request_id}`.
+- **Admin token only:** `POST /repositories`,
+  `POST /github/repositories/import`,
+  `POST /pull-requests/import/{repository_id}`,
+  `POST /pull-requests/{pull_request_id}/refresh`,
+  `POST /commits/import/{pull_request_id}`,
+  `POST /changed-files/import/{commit_id}`,
+  `POST /reviews/import/{pull_request_id}`,
+  `POST /check-runs/import/{pull_request_id}`,
+  `POST /risk/pull-request/{pull_request_id}/analyze`,
+  `POST /features/pull-request/{pull_request_id}/snapshot`,
+  `POST /outcomes/pull-request/{pull_request_id}`, and `POST /ml/train`.
+
+`/`, `/health`, and `/ready` are public status endpoints. API docs are also
+public.
+
+`POST /webhooks/github` is not authenticated with either API token. It
+continues to require a valid GitHub `X-Hub-Signature-256` HMAC using
+`GITHUB_WEBHOOK_SECRET`; an unset secret rejects all deliveries.
+
+This is a minimal, single-operator demo mechanism, not a multi-user identity
+system: credentials are shared static secrets, there are no individual users,
+sessions, revocation records, or per-repository permissions. Use a proper
+identity provider and authorization layer before exposing a production API.
+
 ## Structure
 
 - backend/
@@ -49,6 +97,11 @@ Configure the repository webhook in **Settings > Webhooks > Add webhook**:
 4. Save the webhook. Use GitHub's **Recent Deliveries** page to confirm that
    `pull_request_review` deliveries reach `/webhooks/github` and receive a
    successful response.
+
+API bearer credentials are separate from the webhook secret. Configure
+`API_READ_TOKEN` and `API_ADMIN_TOKEN` for the operator and use the appropriate
+bearer token when calling protected API routes; do not send either token to
+GitHub as the webhook secret.
 
 Open/reopened/synchronized PRs sync commits and changed files before checks,
 reviews, feature snapshots, and outcome evaluation. Review/check events refresh

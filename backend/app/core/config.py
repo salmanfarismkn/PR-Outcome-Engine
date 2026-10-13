@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     github_api_url: str = "https://api.github.com"
     github_token: str = ""
     github_webhook_secret: str = ""
+    api_read_token: str = ""
+    api_admin_token: str = ""
     
     model_config = SettingsConfigDict(
         env_file=".env",

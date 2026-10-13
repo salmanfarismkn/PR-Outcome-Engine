@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.github.schemas import GitHubUser
 from app.github.service import GitHubService
 from app.repository.schemas import RepositoryImportSummary
+from app.api.dependencies import require_admin_access
 
 router = APIRouter(
     prefix="/github",
@@ -27,6 +28,7 @@ def get_me() -> GitHubUser:
 @router.post(
     "/repositories/import",
     response_model=RepositoryImportSummary,
+    dependencies=[Depends(require_admin_access)],
 )
 def import_repositories_endpoint(
     db: Session = Depends(get_db),

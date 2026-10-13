@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.outcome.service import OutcomeEvaluator
 from app.pull_request.models import PullRequest
+from app.api.dependencies import require_admin_access
 
 
 router = APIRouter(
@@ -12,7 +13,10 @@ router = APIRouter(
 )
 
 
-@router.post("/pull-request/{pull_request_id}")
+@router.post(
+    "/pull-request/{pull_request_id}",
+    dependencies=[Depends(require_admin_access)],
+)
 def evaluate_pull_request(
     pull_request_id: int,
     db: Session = Depends(get_db),

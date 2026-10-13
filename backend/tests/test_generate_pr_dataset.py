@@ -113,3 +113,57 @@ def test_generated_scenario_must_match_final_outcome() -> None:
             "healthy",
             "problematic",
         )
+
+
+def test_pr_status_wait_explains_backend_ingestion_404(
+    monkeypatch,
+) -> None:
+    class Response:
+        status_code = 404
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class Client:
+        def __init__(self, *, timeout: float) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def get(self, _url):
+            return Response()
+
+    monkeypatch.setattr(
+        generate_pr_dataset.httpx,
+        "Client",
+        Client,
+    )
+    monkeypatch.setattr(
+        generate_pr_dataset.time,
+        "monotonic",
+        iter([0.0, 0.0, 2.0]).__next__,
+    )
+    monkeypatch.setattr(
+        generate_pr_dataset.time,
+        "sleep",
+        lambda _seconds: None,
+    )
+
+    with pytest.raises(
+        SystemExit,
+        match=(
+            "backend did not ingest PR #173 "
+            r"\(status endpoint returned 404 1 times\)"
+        ),
+    ):
+        generate_pr_dataset.wait_for_pr_status(
+            owner="azuzm",
+            repo="event-checker",
+            pr_number=173,
+            timeout_seconds=1,
+            poll_interval_seconds=1,
+        )
