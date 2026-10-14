@@ -9,6 +9,7 @@ from app.check.schemas import CheckRunImportSummary
 from app.db.session import get_db
 from app.feature.service import PRFeatureService
 from app.pull_request.models import PullRequest
+from app.api.dependencies import require_admin_access
 
 
 router = APIRouter(
@@ -23,6 +24,7 @@ check_sync_service = CheckSyncService()
     "/import/{pull_request_id}",
     response_model=CheckRunImportSummary,
     status_code=HTTPStatus.OK,
+    dependencies=[Depends(require_admin_access)],
 )
 def import_check_runs(
     pull_request_id: int,

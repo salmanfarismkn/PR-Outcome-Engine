@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.pull_request.models import PullRequest
 from app.review.schemas import ReviewImportSummary
 from app.feature.service import PRFeatureService
+from app.api.dependencies import require_admin_access
 
 
 router = APIRouter(
@@ -22,6 +23,7 @@ review_sync_service = ReviewSyncService()
     "/import/{pull_request_id}",
     response_model=ReviewImportSummary,
     status_code=HTTPStatus.OK,
+    dependencies=[Depends(require_admin_access)],
 )
 def import_reviews(
     pull_request_id: int,

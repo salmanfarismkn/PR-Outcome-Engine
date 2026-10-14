@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.pull_request.models import PullRequest
 from app.risk.schemas import (
-    PullRequestRisk,
     RiskAssessmentResponse,
     RiskAssessmentSummary,
 )
 from app.risk.service import RiskService
+from app.api.dependencies import require_admin_access
 
 
 router = APIRouter(
@@ -25,6 +25,7 @@ risk_service = RiskService()
     "/pull-request/{pull_request_id}/analyze",
     response_model=RiskAssessmentResponse,
     status_code=HTTPStatus.OK,
+    dependencies=[Depends(require_admin_access)],
 )
 def analyze_pull_request(
     pull_request_id: int,

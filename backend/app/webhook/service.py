@@ -19,7 +19,7 @@ class WebhookService:
         secret: str,
     ) -> bool:
 
-        if not signature:
+        if not signature or not secret:
             return False
 
         expected = (

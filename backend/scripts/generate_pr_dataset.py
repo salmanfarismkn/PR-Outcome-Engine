@@ -358,6 +358,8 @@ def wait_for_pr_status(
     poll_interval_seconds: int = 2,
 ) -> dict:
     deadline = time.monotonic() + timeout_seconds
+    not_found_responses = 0
+    last_request_error: str | None = None
 
     url = (
         f"{BACKEND_URL}/dataset/pr/github/"
@@ -375,13 +377,21 @@ def wait_for_pr_status(
                 response = client.get(url)
 
                 if response.status_code == 404:
+                    not_found_responses += 1
                     time.sleep(poll_interval_seconds)
                     continue
 
                 response.raise_for_status()
                 status = response.json()
 
-            except httpx.RequestError:
+            except httpx.HTTPStatusError as error:
+                raise SystemExit(
+                    f"Backend status check failed for PR #{pr_number}: "
+                    f"HTTP {error.response.status_code} "
+                    f"({error.response.reason_phrase})."
+                ) from error
+            except httpx.RequestError as error:
+                last_request_error = str(error)
                 time.sleep(poll_interval_seconds)
                 continue
 
@@ -397,9 +407,22 @@ def wait_for_pr_status(
 
             time.sleep(poll_interval_seconds)
 
+    if not_found_responses:
+        raise SystemExit(
+            f"The backend did not ingest PR #{pr_number} "
+            f"(status endpoint returned 404 {not_found_responses} times). "
+            "Verify the repository is registered, the GitHub pull_request "
+            "webhook delivery succeeded, and the backend processed it. "
+            "The PR was not merged."
+        )
+    if last_request_error is not None:
+        raise SystemExit(
+            f"Could not reach the backend while waiting for PR "
+            f"#{pr_number}: {last_request_error}. The PR was not merged."
+        )
     raise SystemExit(
         f"Timed out waiting for PR #{pr_number} "
-        "to reach the required backend state."
+        "to reach the required backend state. The PR was not merged."
     )
 
 def generate_one_pr(

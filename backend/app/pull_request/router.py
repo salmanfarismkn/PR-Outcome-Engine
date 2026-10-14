@@ -9,6 +9,7 @@ from app.pull_request.schemas import PullRequestImportSummary, PullRequestRespon
 from app.repository.models import Repository
 from app.pull_request.models import PullRequest
 from app.pull_request.schemas import PullRequestSchema
+from app.api.dependencies import require_admin_access
 
 router = APIRouter(
     prefix="/pull-requests",
@@ -34,6 +35,7 @@ def get_pull_request(pull_request_id: int, db: Session = Depends(get_db)) -> Pul
     "/import/{repository_id}",
     response_model=PullRequestImportSummary,
     status_code=HTTPStatus.OK,
+    dependencies=[Depends(require_admin_access)],
 )
 
 def import_pull_requests(repository_id: int, db: Session = Depends(get_db)) -> PullRequestImportSummary:
@@ -55,6 +57,7 @@ def import_pull_requests(repository_id: int, db: Session = Depends(get_db)) -> P
 @router.post(
     "/{pull_request_id}/refresh",
     response_model=PullRequestResponse,
+    dependencies=[Depends(require_admin_access)],
 )
 def refresh_pull_request(
     pull_request_id: int,

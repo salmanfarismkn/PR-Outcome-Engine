@@ -7,6 +7,7 @@ from app.application.commit_sync import CommitSyncService
 from app.commit.schemas import CommitImportSummary
 from app.db.session import get_db
 from app.pull_request.models import PullRequest
+from app.api.dependencies import require_admin_access
 
 router = APIRouter(
     prefix="/commits",
@@ -20,6 +21,7 @@ commit_sync_service = CommitSyncService()
     "/import/{pull_request_id}",
     response_model=CommitImportSummary,
     status_code=HTTPStatus.OK,
+    dependencies=[Depends(require_admin_access)],
 )
 def import_commits(
     pull_request_id: int,

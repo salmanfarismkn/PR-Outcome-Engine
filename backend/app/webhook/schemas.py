@@ -17,8 +17,7 @@ class GitHubWebhookPullRequest(BaseModel):
     title: str
 
     state: str
-    merged: bool
-
+    merged: bool | None = None
     merged_at: datetime | None
     closed_at: datetime | None
 

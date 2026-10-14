@@ -40,8 +40,9 @@ class ReviewWebhookService:
             )
         )
         if repository is None:
-            raise ValueError(
-                "Repository from review webhook has not been synchronized."
+            raise WebhookDependencyPending(
+                "Repository from review webhook "
+                "has not been synchronized yet."
             )
 
         pull_request = db.scalar(

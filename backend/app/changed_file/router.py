@@ -5,11 +5,16 @@ from app.db.session import get_db
 
 from app.application.changed_file_sync import ChangedFileSyncService
 from app.changed_file.schemas import ChangedFileImportSummary
+from app.api.dependencies import require_admin_access
 
 router = APIRouter(prefix="/changed-files", tags=["changed-files"])
 
 
-@router.post("/import/{commit_id}", response_model=ChangedFileImportSummary)
+@router.post(
+    "/import/{commit_id}",
+    response_model=ChangedFileImportSummary,
+    dependencies=[Depends(require_admin_access)],
+)
 def import_changed_files(
     commit_id: int,
     owner: str,

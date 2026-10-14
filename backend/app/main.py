@@ -3,7 +3,9 @@ from fastapi import FastAPI
 from app.api.router import router as api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.health.router import router as health_router
 from app.ml.router import router as ml_router
+from app.webhook.router import router as webhook_router
 
 configure_logging()
 
@@ -16,6 +18,8 @@ app = FastAPI(
 
 app.include_router(api_router)
 app.include_router(ml_router)
+app.include_router(health_router)
+app.include_router(webhook_router)
 
 
 @app.get("/")
@@ -25,4 +29,3 @@ async def root():
         "status": "running",
         "version": "0.1.0",
     }
-
