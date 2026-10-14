@@ -9,7 +9,6 @@ from app.analysis.classifier import FileClassifier
 from app.check.models import CheckRun
 
 from app.review.models import Review
-from app import db
 
 class AnalysisService:
     """Calculates deterministic metrics from persisted PR data."""

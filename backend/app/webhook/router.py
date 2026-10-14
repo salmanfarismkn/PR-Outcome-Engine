@@ -16,7 +16,6 @@ from app.webhook.service import WebhookService
 from app.webhook.exceptions import (
     WebhookDependencyPending,
 )
-from app import db
 
 router = APIRouter(
     prefix="/webhooks",

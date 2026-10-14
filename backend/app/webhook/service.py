@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.webhook.models import WebhookEvent
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 class WebhookService:
 
@@ -113,10 +113,9 @@ class WebhookService:
 
         try:
             db.commit()
-        except IntegrityError as e:
+        except SQLAlchemyError:
             db.rollback()
-            event.status = "failed"
-            event.error_message = str(e)
+            raise
 
     def mark_failed(
         self,

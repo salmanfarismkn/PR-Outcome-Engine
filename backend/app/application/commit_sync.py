@@ -6,8 +6,6 @@ from app.commit.schemas import CommitImportSummary
 from app.commit.service import CommitService
 from app.github.service import GitHubService
 from app.pull_request.models import PullRequest
-from app import pull_request
-from app import db
 
 
 class CommitSyncService:
@@ -48,4 +46,3 @@ class CommitSyncService:
             flush=True,
         )
         return result
-

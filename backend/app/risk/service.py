@@ -7,7 +7,6 @@ from app.analysis.service import AnalysisService
 from app.risk.engine import RiskEngine
 from app.risk.models import RiskAssessment
 from app.risk.schemas import (
-    PullRequestRisk,
     RiskAssessmentResponse,
     RiskAssessmentSummary,
 )
