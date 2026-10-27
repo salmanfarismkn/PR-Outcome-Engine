@@ -1,47 +1,29 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
-from app.application.pull_request_webhook import (
-    PullRequestWebhookService,
-)
-from app.webhook.schemas import PullRequestWebhookPayload
-from app.application.review_webhook import (
-    ReviewWebhookService,
-)
-from app.application.check_webhook import (
-    CheckRunWebhookService,
-)
-
+from app.application.check_webhook import CheckRunWebhookService
+from app.application.pull_request_webhook import PullRequestWebhookService
+from app.application.push_webhook import PushWebhookService
+from app.application.review_webhook import ReviewWebhookService
 from app.webhook.schemas import (
     CheckRunWebhookPayload,
-)
-from app.webhook.schemas import (
     PullRequestReviewWebhookPayload,
-)
-from app.application.push_webhook import (
-    PushWebhookService,
-)
-
-from app.webhook.schemas import (
+    PullRequestWebhookPayload,
     PushWebhookPayload,
 )
 
-class WebhookDispatcher:
+logger = logging.getLogger(__name__)
 
+
+class WebhookDispatcher:
     def __init__(self) -> None:
-        self._pull_request_service = (
-            PullRequestWebhookService()
-        )
-        self._review_service = (
-            ReviewWebhookService()
-        )
-        self._check_service = (
-            CheckRunWebhookService()
-        )
-        self._push_service = (
-            PushWebhookService()
-        )
+        self._pull_request_service = PullRequestWebhookService()
+        self._review_service = ReviewWebhookService()
+        self._check_service = CheckRunWebhookService()
+        self._push_service = PushWebhookService()
 
     def dispatch(
         self,
@@ -50,28 +32,24 @@ class WebhookDispatcher:
         payload: dict,
         delivery_id: str,
     ) -> None:
+        logger.debug(
+            "Dispatching GitHub webhook (event=%s, delivery=%s)",
+            event_type,
+            delivery_id,
+        )
 
         if event_type == "pull_request":
-            self._handle_pull_request(
-                db=db,
-                payload=payload,
-            )
+            self._handle_pull_request(db=db, payload=payload)
             return
 
         if event_type == "pull_request_review":
-            self._handle_pull_request_review(
-                db=db,
-                payload=payload,
-            )
+            self._handle_pull_request_review(db=db, payload=payload)
             return
 
         if event_type == "check_run":
-            self._handle_check_run(
-                db=db,
-                payload=payload,
-            )
+            self._handle_check_run(db=db, payload=payload)
             return
-        
+
         if event_type == "push":
             self._handle_push(
                 db=db,
@@ -80,42 +58,39 @@ class WebhookDispatcher:
             )
             return
 
+        logger.info(
+            "Ignoring unsupported GitHub webhook event "
+            "(event=%s, delivery=%s)",
+            event_type,
+            delivery_id,
+        )
+
     def _handle_pull_request(
         self,
         db: Session,
         payload: dict,
     ) -> None:
+        webhook_payload = PullRequestWebhookPayload.model_validate(payload)
 
-        print("[webhook-debug] pull_request: validating payload", flush=True)
-        webhook_payload = (
-            PullRequestWebhookPayload.model_validate(
-                payload
-            )
-        )
-        print(
-            "[webhook-debug] pull_request: payload validated; "
-            f"action={webhook_payload.action!r}, "
-            f"number={webhook_payload.pull_request.number}",
-            flush=True,
+        logger.debug(
+            "Processing pull request webhook "
+            "(action=%s, pull_request=%s)",
+            webhook_payload.action,
+            webhook_payload.pull_request.number,
         )
 
-        print("[webhook-debug] pull_request: process started", flush=True)
         self._pull_request_service.process(
             db=db,
             payload=webhook_payload,
         )
-        print("[webhook-debug] pull_request: process returned", flush=True)
 
     def _handle_pull_request_review(
         self,
         db: Session,
         payload: dict,
     ) -> None:
-
         webhook_payload = (
-            PullRequestReviewWebhookPayload.model_validate(
-                payload
-            )
+            PullRequestReviewWebhookPayload.model_validate(payload)
         )
 
         self._review_service.process(
@@ -128,12 +103,7 @@ class WebhookDispatcher:
         db: Session,
         payload: dict,
     ) -> None:
-
-        webhook_payload = (
-            CheckRunWebhookPayload.model_validate(
-                payload
-            )
-        )
+        webhook_payload = CheckRunWebhookPayload.model_validate(payload)
 
         self._check_service.process(
             db=db,
@@ -146,12 +116,7 @@ class WebhookDispatcher:
         payload: dict,
         delivery_id: str,
     ) -> None:
-
-        webhook_payload = (
-            PushWebhookPayload.model_validate(
-                payload
-            )
-        )
+        webhook_payload = PushWebhookPayload.model_validate(payload)
 
         self._push_service.process(
             db=db,
