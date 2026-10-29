@@ -6,6 +6,7 @@ import hmac
 import app.main  # noqa: F401
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from app.application import review_webhook
 from app.application.review_webhook import ReviewWebhookService
@@ -292,6 +293,95 @@ async def test_processed_review_delivery_is_idempotently_ignored(
         secret="test-secret",
     )
     dispatcher.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_successfully_processed_delivery_returns_processed_status(
+    monkeypatch,
+) -> None:
+    payload = _payload().model_dump_json().encode()
+    request = SimpleNamespace(
+        body=AsyncMock(return_value=payload),
+        headers={"X-GitHub-Event": "pull_request_review"},
+    )
+    event = SimpleNamespace(status="received")
+    service = Mock()
+    service.verify_signature.return_value = True
+    service.get_event.return_value = None
+    service.create_event.return_value = event
+    service.parse_payload.return_value = _payload().model_dump()
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+    dispatcher = Mock()
+    monkeypatch.setattr("app.webhook.router.webhook_dispatcher", dispatcher)
+
+    result = await github_webhook(
+        request=request,
+        x_github_event="pull_request_review",
+        x_github_delivery="delivery-success",
+        x_hub_signature_256="sha256=valid",
+        db=Mock(),
+    )
+
+    assert result == {
+        "status": "processed",
+        "event": "pull_request_review",
+    }
+    service.mark_processing.assert_called_once()
+    dispatcher.dispatch.assert_called_once()
+    service.mark_processed.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_status_commit_fails", [False, True])
+async def test_processed_status_commit_failure_returns_http_500(
+    monkeypatch,
+    failed_status_commit_fails: bool,
+) -> None:
+    payload = _payload().model_dump_json().encode()
+    request = SimpleNamespace(body=AsyncMock(return_value=payload))
+    event = SimpleNamespace(status="received", error_message=None)
+    db = Mock()
+    commit_error = IntegrityError(
+        "UPDATE webhook_event",
+        {},
+        RuntimeError("commit rejected"),
+    )
+    db.commit.side_effect = [
+        None,
+        commit_error,
+        commit_error if failed_status_commit_fails else None,
+    ]
+    service = WebhookService()
+    service.verify_signature = Mock(return_value=True)
+    service.get_event = Mock(return_value=None)
+    service.create_event = Mock(return_value=event)
+    service.parse_payload = Mock(return_value=_payload().model_dump())
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+    dispatcher = Mock()
+    monkeypatch.setattr("app.webhook.router.webhook_dispatcher", dispatcher)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await github_webhook(
+            request=request,
+            x_github_event="pull_request_review",
+            x_github_delivery="delivery-commit-failure",
+            x_hub_signature_256="sha256=valid",
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Webhook processing failed."
+    assert db.commit.call_count == 3
+    assert db.rollback.call_count == 1 + failed_status_commit_fails
+    dispatcher.dispatch.assert_called_once()
 
 
 @pytest.mark.asyncio

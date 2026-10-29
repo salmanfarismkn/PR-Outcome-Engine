@@ -1,11 +1,5 @@
-from xmlrpc import client
-
 from app.core.config import Settings
 from app.github.client import GitHubClient
-from app import pull_request
-from app import repository
-from app import commit
-from app import changed_file
 
 settings = Settings()
 

@@ -6,6 +6,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.pull_request.models import PullRequest
+
 
 class PRFeatureSnapshot(BaseModel):
     __tablename__ = "pr_feature_snapshot"

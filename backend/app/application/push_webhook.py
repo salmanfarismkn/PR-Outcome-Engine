@@ -6,15 +6,12 @@ from sqlalchemy.orm import Session
 from app.push.models import PushEvent
 from app.repository.models import Repository
 from app.webhook.schemas import PushWebhookPayload
-from app import repository
 from app.application.push_commit_linker import (
     PushCommitLinker,
 )
 from app.application.revert_detection import (
     RevertDetectionService,
 )
-from app import db
-from app.commit.models import Commit
 from app.commit.service import CommitService
 
 class PushWebhookService:
@@ -101,4 +98,3 @@ class PushWebhookService:
             pull_request_id=None,  # push events don’t prove PR linkage
             commits=payload.commits,
         )
-

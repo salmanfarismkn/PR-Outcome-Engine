@@ -1,6 +1,46 @@
 # PR Outcome Engine
 
-This repository has been scaffolded with the requested project structure.
+PR Analyzer collects GitHub pull-request evidence and provides API endpoints
+for reviewing persisted PR data, analysis, and experimental risk evaluation.
+
+## Local container setup
+
+The root `docker-compose.yml` starts PostgreSQL and pgAdmin for local
+development; it does not build or start the backend. Copy the root
+`.env.example` to `.env`, set distinct non-empty random URL-safe values for
+`POSTGRES_PASSWORD` and `PGADMIN_DEFAULT_PASSWORD`, then run
+`docker compose --env-file .env config --quiet` to validate configuration
+without starting containers. Start the local database tools with
+`docker compose --env-file .env up -d`. Compose exits with a clear error when
+either service password is unset.
+
+PostgreSQL and pgAdmin are published only on `127.0.0.1` by default, on ports
+5432 and 8080 respectively; override `POSTGRES_HOST_PORT` or
+`PGADMIN_HOST_PORT` in the ignored root `.env` if those local ports are busy.
+The pgAdmin service waits for PostgreSQL's `pg_isready` health check. From the
+host-run backend, configure `DATABASE_URL` in `backend/.env` to use
+`127.0.0.1`, the selected PostgreSQL port, and the same database username and
+password. For a client running inside the Compose network, PostgreSQL's
+hostname is `postgres` and its port is 5432. pgAdmin can connect to that same
+internal hostname.
+
+The backend's local configuration is separate: copy `backend/.env.example` to
+`backend/.env` and set `DATABASE_URL`, distinct `API_READ_TOKEN` and
+`API_ADMIN_TOKEN` values, and `GITHUB_WEBHOOK_SECRET` when receiving webhooks.
+The root and backend `.env` files are ignored by Git. The Compose file is a
+local-development convenience, not a production deployment: it provides no
+TLS termination, external secret manager, backend service, or production
+network policy. `DEBUG` defaults to false, but a process environment or local
+`.env` can override it. Set `DEBUG=false` explicitly for a demo so SQL
+statements and parameters are not echoed; enable it only for local
+troubleshooting when query logging is appropriate.
+
+Compose environment variables initialize PostgreSQL and pgAdmin when their
+data volumes are first created; changing passwords in `.env` does not rotate
+credentials stored in an existing volume. Preserve existing volumes and use
+the already-configured credentials when connecting to existing local data.
+Credential rotation for an existing database or pgAdmin volume is a separate,
+deliberate operation; do not remove volumes to apply new credentials.
 
 ## API authentication
 

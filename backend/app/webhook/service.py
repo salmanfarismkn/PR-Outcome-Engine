@@ -5,10 +5,11 @@ import hmac
 import json
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.webhook.models import WebhookEvent
-from sqlalchemy.exc import IntegrityError
+
 
 class WebhookService:
 
@@ -55,22 +56,20 @@ class WebhookService:
         event_type: str,
         payload: bytes,
     ) -> WebhookEvent:
-
         event = WebhookEvent(
             delivery_id=delivery_id,
             event_type=event_type,
             status="received",
             payload=payload.decode("utf-8"),
         )
-
         db.add(event)
+
         try:
             db.commit()
-        except IntegrityError as e:
-            db.rollback()
-            event.status = "failed"
-            event.error_message = str(e)
             db.refresh(event)
+        except SQLAlchemyError:
+            db.rollback()
+            raise
 
         return event
 
@@ -80,43 +79,42 @@ class WebhookService:
         event: WebhookEvent,
         reason: str,
     ) -> None:
-
         event.status = "pending"
         event.error_message = reason
 
-        db.commit()
-        
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            raise
+
     def mark_processing(
         self,
         db: Session,
         event: WebhookEvent,
     ) -> None:
-
         event.status = "processing"
         event.error_message = None
 
         try:
             db.commit()
-        except IntegrityError as e:
+        except SQLAlchemyError:
             db.rollback()
-            event.status = "failed"
-            event.error_message = str(e)
+            raise
 
     def mark_processed(
         self,
         db: Session,
         event: WebhookEvent,
     ) -> None:
-
         event.status = "processed"
         event.error_message = None
 
         try:
             db.commit()
-        except IntegrityError as e:
+        except SQLAlchemyError:
             db.rollback()
-            event.status = "failed"
-            event.error_message = str(e)
+            raise
 
     def mark_failed(
         self,
@@ -124,18 +122,15 @@ class WebhookService:
         event: WebhookEvent,
         error_message: str,
     ) -> None:
-
         event.status = "failed"
         event.error_message = error_message
 
-
-
         try:
             db.commit()
-        except IntegrityError as e:
+        except SQLAlchemyError:
             db.rollback()
-            event.status = "failed"
-            event.error_message = str(e)
+            raise
+
 
 
     @staticmethod

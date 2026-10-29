@@ -9,11 +9,8 @@ from app.pull_request.schemas import PullRequestImportSummary
 from app.pull_request.service import PullRequestService
 from app.repository.models import Repository
 from app.pull_request.models import PullRequest
-from app.commit.models import Commit
 from app.application.commit_sync import CommitSyncService
-from app import pull_request
 from app.changed_file.models import ChangedFile
-from app.commit.models import Commit
 
 
 class PullRequestSyncService:

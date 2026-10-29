@@ -1,12 +1,10 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.repository.models import Repository
-from app.repository.schemas import RepositoryImportSummary
 from app.github.client import GitHubClient
 from app.core.config import get_settings
 
 from app.github.schemas import GitHubChangedFile, GitHubPullRequest, GitHubRepository
-from app.pull_request.schemas import PullRequestImportSummary
 from app.github.schemas import GitHubCommit
 from app.github.schemas import GitHubReview
 from app.github.schemas import GitHubCheckRun

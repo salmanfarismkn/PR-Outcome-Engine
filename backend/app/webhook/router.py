@@ -1,4 +1,5 @@
 from http import HTTPStatus
+import logging
 
 from fastapi import (
     APIRouter,
@@ -7,16 +8,16 @@ from fastapi import (
     HTTPException,
     Request,
 )
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.webhook.dispatcher import WebhookDispatcher
+from app.webhook.exceptions import WebhookDependencyPending
 from app.webhook.service import WebhookService
-from app.webhook.exceptions import (
-    WebhookDependencyPending,
-)
-from app import db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/webhooks",
@@ -48,7 +49,6 @@ async def github_webhook(
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
-
     payload = await request.body()
 
     if not webhook_service.verify_signature(
@@ -56,6 +56,12 @@ async def github_webhook(
         signature=x_hub_signature_256,
         secret=settings.github_webhook_secret,
     ):
+        logger.warning(
+            "Rejected GitHub webhook with invalid signature "
+            "(event=%s, delivery=%s)",
+            x_github_event,
+            x_github_delivery,
+        )
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail="Invalid webhook signature.",
@@ -68,6 +74,10 @@ async def github_webhook(
 
     if event is not None:
         if event.status == "processed":
+            logger.debug(
+                "Ignoring already-processed GitHub delivery %s",
+                x_github_delivery,
+            )
             return {
                 "status": "already_processed",
             }
@@ -82,47 +92,52 @@ async def github_webhook(
             payload=payload,
         )
 
-    data = webhook_service.parse_payload(
-        payload
-    )
+    data = webhook_service.parse_payload(payload)
 
-    print(
-        "[webhook-debug] endpoint: mark_processing started; "
-        f"event={x_github_event!r}, delivery={x_github_delivery}",
-        flush=True,
+    logger.info(
+        "Starting GitHub webhook processing "
+        "(event=%s, delivery=%s)",
+        x_github_event,
+        x_github_delivery,
     )
     webhook_service.mark_processing(
         db=db,
         event=event,
     )
-    print("[webhook-debug] endpoint: mark_processing returned", flush=True)
 
     try:
-        print("[webhook-debug] endpoint: dispatch started", flush=True)
         webhook_dispatcher.dispatch(
             db=db,
             event_type=x_github_event,
             payload=data,
             delivery_id=x_github_delivery,
         )
-        print("[webhook-debug] endpoint: dispatch returned", flush=True)
 
-        print("[webhook-debug] endpoint: mark_processed started", flush=True)
         webhook_service.mark_processed(
             db=db,
             event=event,
         )
-        print("[webhook-debug] endpoint: mark_processed returned", flush=True)
+
+        logger.info(
+            "GitHub webhook processed successfully "
+            "(event=%s, delivery=%s)",
+            x_github_event,
+            x_github_delivery,
+        )
 
     except WebhookDependencyPending as exc:
-
-        print("[webhook-debug] endpoint: mark_pending started", flush=True)
         webhook_service.mark_pending(
             db=db,
             event=event,
             reason=str(exc),
         )
-        print("[webhook-debug] endpoint: mark_pending returned", flush=True)
+
+        logger.warning(
+            "GitHub webhook remains pending because a dependency "
+            "is unavailable (event=%s, delivery=%s)",
+            x_github_event,
+            x_github_delivery,
+        )
 
         return {
             "status": "pending",
@@ -130,25 +145,31 @@ async def github_webhook(
         }
 
     except Exception as exc:
+        logger.exception(
+            "GitHub webhook processing failed "
+            "(event=%s, delivery=%s)",
+            x_github_event,
+            x_github_delivery,
+        )
 
-        print(
-            "[webhook-debug] endpoint: mark_failed started; "
-            f"error={type(exc).__name__}: {exc}",
-            flush=True,
-        )
-        webhook_service.mark_failed(
-            db=db,
-            event=event,
-            error_message=str(exc),
-        )
-        print("[webhook-debug] endpoint: mark_failed returned", flush=True)
+        try:
+            webhook_service.mark_failed(
+                db=db,
+                event=event,
+                error_message=str(exc),
+            )
+        except SQLAlchemyError:
+            logger.exception(
+                "Failed to persist failed GitHub webhook status "
+                "(event=%s, delivery=%s)",
+                x_github_event,
+                x_github_delivery,
+            )
 
         raise HTTPException(
-            status_code=500,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Webhook processing failed.",
         ) from exc
-
-    print("Event type:", request.headers.get("X-GitHub-Event"))
 
     return {
         "status": "processed",
