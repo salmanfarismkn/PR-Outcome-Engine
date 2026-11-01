@@ -28,25 +28,14 @@ whether a real deployment addresses it.
 
 ### 1. Authentication, authorization, GitHub credentials, secrets, and network exposure
 
-#### SEC-1 — Configured GitHub credential is not sent to GitHub
-- **Current behavior / files:** `backend/app/github/service.py` passes
-  `settings.github_token` to `GitHubClient`, but
-  `backend/app/github/client.py` constructs the `Authorization` header with
-  the literal value `"******"` instead of the supplied token.
-  `backend/tests/test_github_review_pagination.py` currently asserts that
-  literal header.
-- **Status:** Confirmed gap.
-- **Severity / consequence:** **P0 Blocker.** Authenticated GitHub REST calls
-  cannot use the configured credential; repository import and webhook
-  synchronization that depends on GitHub will fail or be unauthorized.
-- **Smallest justified change:** Build the bearer header from the constructor's
-  token, reject missing credentials for operations that require them, and
-  replace the masking-string test with an assertion against a test-only token.
-- **Acceptance:** An `httpx.MockTransport` test verifies the configured
-  test-only credential is sent as the bearer value; empty-token behavior is
-  explicit; no test or log prints a real token. Exercise repository,
-  PR, review, check, and changed-file API calls through mocked responses.
-- **Dependencies:** None; complete before any GitHub-backed staging test.
+#### SEC-1 — GitHub credential configuration and usage require explicit policy
+
+- **Current behavior / files:** `backend/app/core/config.py` defines `github_token` with an empty-string default. `backend/app/github/service.py` and `backend/app/changed_file/service.py` pass the configured value to `GitHubClient`. `backend/app/github/client.py` sets the `Authorization: Bearer {token}` header.
+- **Status:** The original finding that the configured token is not sent is **not supported by the currently inspected code**. The client uses the supplied token. Missing-token behavior and the application's intended authenticated versus unauthenticated operating modes still require explicit verification.
+- **Severity / consequence:** The original P0 claim is not established. Missing or invalid credentials can cause GitHub API operations to fail, and the application should report configuration failures clearly.
+- **Smallest justified change:** Preserve the existing bearer-header implementation. Decide and document whether `GITHUB_TOKEN` is mandatory for the deployed application. Validate the selected policy and provide actionable configuration errors without exposing credentials.
+- **Acceptance:** Mocked HTTP tests verify that a test-only token is sent as the bearer value. Tests explicitly cover missing-token behavior under the selected policy. No real token is included in tests, logs, or committed files.
+- **Dependencies:** Complete before GitHub-backed staging tests. Do not treat the historical      masked-header defect as a current defect without new evidence.
 
 #### SEC-2 — Static shared bearer credentials are not an operator identity system
 - **Current behavior / files:** `backend/app/api/dependencies.py` compares
@@ -576,8 +565,7 @@ whether a real deployment addresses it.
 ## Production deployment gate
 
 On the inspected repository evidence alone, **this service is not ready for a
-production deployment**. At minimum, the GitHub credential defect must be
-fixed; webhook intake needs durable asynchronous processing, atomic duplicate
+production deployment**. At minimum, GitHub credential configuration and missing-token behavior must be verified; webhook intake needs durable asynchronous processing, atomic duplicate
 claims, lease recovery, retry/dead-letter handling, and repeatable recovery;
 data imports must be complete; database transaction/migration and tested
 backup/restore procedures must exist; and the chosen deployment must provide

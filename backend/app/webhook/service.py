@@ -5,9 +5,10 @@ import hmac
 import json
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.webhook.exceptions import DuplicateWebhookDelivery
 from app.webhook.models import WebhookEvent
 
 
@@ -67,11 +68,41 @@ class WebhookService:
         try:
             db.commit()
             db.refresh(event)
+        except IntegrityError as exc:
+            db.rollback()
+            if not self._is_delivery_unique_conflict(exc):
+                raise
+
+            existing = self.get_event(db, delivery_id)
+            if existing is None:
+                raise
+            raise DuplicateWebhookDelivery(existing) from exc
         except SQLAlchemyError:
             db.rollback()
             raise
 
         return event
+
+    @staticmethod
+    def _is_delivery_unique_conflict(error: IntegrityError) -> bool:
+        original = error.orig
+        sqlstate = getattr(original, "pgcode", None) or getattr(
+            original,
+            "sqlstate",
+            None,
+        )
+        if sqlstate == "23505":
+            constraint_name = getattr(
+                getattr(original, "diag", None),
+                "constraint_name",
+                None,
+            )
+            return constraint_name in {
+                "webhook_event_delivery_id_key",
+                "uq_webhook_event_delivery_id",
+            }
+
+        return "delivery_id" in str(original)
 
     def mark_pending(
         self,
