@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.application import review_webhook
 from app.application.review_webhook import ReviewWebhookService
 from app.application.webhook_retry import WebhookRetryService
+from app.webhook.exceptions import DuplicateWebhookDelivery
 from app.webhook.router import github_webhook
 from app.webhook.exceptions import WebhookDependencyPending
 from app.webhook.schemas import PullRequestReviewWebhookPayload
@@ -166,6 +167,79 @@ def test_webhook_signature_uses_sha256_hmac() -> None:
     )
 
 
+def test_create_event_commits_and_refreshes_event() -> None:
+    db = Mock()
+    service = WebhookService()
+
+    event = service.create_event(
+        db,
+        "delivery-success",
+        "pull_request_review",
+        b'{"action":"submitted"}',
+    )
+
+    assert event.delivery_id == "delivery-success"
+    assert event.status == "received"
+    db.commit.assert_called_once()
+    db.refresh.assert_called_once_with(event)
+
+
+def test_create_event_rolls_back_and_propagates_unrelated_database_failure() -> None:
+    db = Mock()
+    error = IntegrityError(
+        "INSERT INTO webhook_event",
+        {},
+        SimpleNamespace(
+            pgcode="23505",
+            diag=SimpleNamespace(constraint_name="other_unique_constraint"),
+        ),
+    )
+    db.commit.side_effect = error
+
+    with pytest.raises(IntegrityError) as exc_info:
+        WebhookService().create_event(
+            db,
+            "delivery-failure",
+            "pull_request_review",
+            b"{}",
+        )
+
+    assert exc_info.value is error
+    db.rollback.assert_called_once()
+    db.scalar.assert_not_called()
+
+
+def test_create_event_requeries_after_duplicate_insert_conflict() -> None:
+    db = Mock()
+    existing = SimpleNamespace(
+        delivery_id="delivery-duplicate",
+        status="processing",
+    )
+    db.commit.side_effect = IntegrityError(
+        "INSERT INTO webhook_event",
+        {},
+        SimpleNamespace(
+            pgcode="23505",
+            diag=SimpleNamespace(
+                constraint_name="webhook_event_delivery_id_key"
+            ),
+        ),
+    )
+    db.scalar.return_value = existing
+
+    with pytest.raises(DuplicateWebhookDelivery) as exc_info:
+        WebhookService().create_event(
+            db,
+            "delivery-duplicate",
+            "pull_request_review",
+            b"{}",
+        )
+
+    assert exc_info.value.event is existing
+    db.rollback.assert_called_once()
+    db.scalar.assert_called_once()
+
+
 def test_review_webhook_defers_when_pr_has_not_been_ingested() -> None:
     db = Mock()
     db.scalar.side_effect = [SimpleNamespace(id=70), None]
@@ -292,6 +366,74 @@ async def test_processed_review_delivery_is_idempotently_ignored(
         signature="sha256=valid",
         secret="test-secret",
     )
+    dispatcher.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_status", ["received", "processing"])
+async def test_active_duplicate_review_delivery_is_not_dispatched(
+    monkeypatch,
+    event_status: str,
+) -> None:
+    payload = b'{"action":"submitted"}'
+    request = SimpleNamespace(body=AsyncMock(return_value=payload))
+    service = Mock()
+    service.verify_signature.return_value = True
+    service.get_event.return_value = SimpleNamespace(status=event_status)
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+    dispatcher = Mock()
+    monkeypatch.setattr("app.webhook.router.webhook_dispatcher", dispatcher)
+
+    result = await github_webhook(
+        request=request,
+        x_github_event="pull_request_review",
+        x_github_delivery="delivery-active",
+        x_hub_signature_256="sha256=valid",
+        db=Mock(),
+    )
+
+    assert result == {"status": "in_progress"}
+    dispatcher.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_status", ["received", "processing"])
+async def test_duplicate_insert_conflict_is_not_dispatched(
+    monkeypatch,
+    event_status: str,
+) -> None:
+    payload = b'{"action":"submitted"}'
+    request = SimpleNamespace(body=AsyncMock(return_value=payload))
+    event = SimpleNamespace(
+        delivery_id="delivery-race",
+        status=event_status,
+        error_message=None,
+    )
+    service = Mock()
+    service.verify_signature.return_value = True
+    service.get_event.return_value = None
+    service.create_event.side_effect = DuplicateWebhookDelivery(event)
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+    dispatcher = Mock()
+    monkeypatch.setattr("app.webhook.router.webhook_dispatcher", dispatcher)
+
+    result = await github_webhook(
+        request=request,
+        x_github_event="pull_request_review",
+        x_github_delivery="delivery-race",
+        x_hub_signature_256="sha256=valid",
+        db=Mock(),
+    )
+
+    assert result == {"status": "in_progress"}
     dispatcher.dispatch.assert_not_called()
 
 

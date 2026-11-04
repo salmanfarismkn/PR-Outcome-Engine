@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.webhook.dispatcher import WebhookDispatcher
-from app.webhook.exceptions import WebhookDependencyPending
+from app.webhook.exceptions import (
+    DuplicateWebhookDelivery,
+    WebhookDependencyPending,
+)
 from app.webhook.service import WebhookService
 
 logger = logging.getLogger(__name__)
@@ -82,15 +85,39 @@ async def github_webhook(
                 "status": "already_processed",
             }
 
-        # Failed events are allowed to retry.
-        # Received/processing events are also retriable.
+        if event.status in {"received", "processing"}:
+            return {
+                "status": "in_progress",
+            }
+
+        if event.status == "pending":
+            return {
+                "status": "pending",
+                "reason": event.error_message,
+            }
     else:
-        event = webhook_service.create_event(
-            db=db,
-            delivery_id=x_github_delivery,
-            event_type=x_github_event,
-            payload=payload,
-        )
+        try:
+            event = webhook_service.create_event(
+                db=db,
+                delivery_id=x_github_delivery,
+                event_type=x_github_event,
+                payload=payload,
+            )
+        except DuplicateWebhookDelivery as exc:
+            event = exc.event
+            if event.status == "processed":
+                return {
+                    "status": "already_processed",
+                }
+            if event.status in {"received", "processing"}:
+                return {
+                    "status": "in_progress",
+                }
+            if event.status == "pending":
+                return {
+                    "status": "pending",
+                    "reason": event.error_message,
+                }
 
     data = webhook_service.parse_payload(payload)
 
