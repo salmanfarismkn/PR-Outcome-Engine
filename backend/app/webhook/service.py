@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -10,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.webhook.exceptions import DuplicateWebhookDelivery
 from app.webhook.models import WebhookEvent
+
+logger = logging.getLogger(__name__)
 
 
 class WebhookService:
@@ -110,11 +114,22 @@ class WebhookService:
         event: WebhookEvent,
         reason: str,
     ) -> None:
+        previous_status = event.status
         event.status = "pending"
         event.error_message = reason
 
         try:
             db.commit()
+            logger.info(
+                "Webhook status changed event_id=%s delivery_id=%s "
+                "event_type=%s previous_status=%s new_status=pending "
+                "attempt_count=%s",
+                getattr(event, "id", None),
+                getattr(event, "delivery_id", None),
+                getattr(event, "event_type", None),
+                previous_status,
+                event.attempt_count,
+            )
         except SQLAlchemyError:
             db.rollback()
             raise
@@ -124,11 +139,24 @@ class WebhookService:
         db: Session,
         event: WebhookEvent,
     ) -> None:
+        previous_status = event.status
         event.status = "processing"
         event.error_message = None
+        event.attempt_count = getattr(event, "attempt_count", 0) + 1
+        event.last_attempt_at = datetime.now(UTC)
 
         try:
             db.commit()
+            logger.info(
+                "Webhook status changed event_id=%s delivery_id=%s "
+                "event_type=%s previous_status=%s new_status=processing "
+                "attempt_count=%s",
+                getattr(event, "id", None),
+                getattr(event, "delivery_id", None),
+                getattr(event, "event_type", None),
+                previous_status,
+                event.attempt_count,
+            )
         except SQLAlchemyError:
             db.rollback()
             raise
@@ -138,11 +166,23 @@ class WebhookService:
         db: Session,
         event: WebhookEvent,
     ) -> None:
+        previous_status = event.status
         event.status = "processed"
         event.error_message = None
+        event.last_error_at = None
 
         try:
             db.commit()
+            logger.info(
+                "Webhook status changed event_id=%s delivery_id=%s "
+                "event_type=%s previous_status=%s new_status=processed "
+                "attempt_count=%s",
+                getattr(event, "id", None),
+                getattr(event, "delivery_id", None),
+                getattr(event, "event_type", None),
+                previous_status,
+                event.attempt_count,
+            )
         except SQLAlchemyError:
             db.rollback()
             raise
@@ -153,11 +193,54 @@ class WebhookService:
         event: WebhookEvent,
         error_message: str,
     ) -> None:
+        previous_status = event.status
         event.status = "failed"
         event.error_message = error_message
+        event.last_error_at = datetime.now(UTC)
 
         try:
             db.commit()
+            logger.warning(
+                "Webhook status changed event_id=%s delivery_id=%s "
+                "event_type=%s previous_status=%s new_status=failed "
+                "attempt_count=%s failure_category=handler",
+                getattr(event, "id", None),
+                getattr(event, "delivery_id", None),
+                getattr(event, "event_type", None),
+                previous_status,
+                event.attempt_count,
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            raise
+
+    def mark_retryable_failure(
+        self,
+        db: Session,
+        event: WebhookEvent,
+        error_message: str,
+        exhausted: bool,
+    ) -> None:
+        previous_status = event.status
+        event.status = "failed" if exhausted else "received"
+        event.error_message = error_message
+        event.last_error_at = datetime.now(UTC)
+
+        try:
+            db.commit()
+            logger.warning(
+                "Webhook recovery status changed event_id=%s "
+                "delivery_id=%s event_type=%s previous_status=%s "
+                "new_status=%s attempt_count=%s failure_category=handler "
+                "exhausted=%s",
+                getattr(event, "id", None),
+                getattr(event, "delivery_id", None),
+                getattr(event, "event_type", None),
+                previous_status,
+                event.status,
+                event.attempt_count,
+                exhausted,
+            )
         except SQLAlchemyError:
             db.rollback()
             raise

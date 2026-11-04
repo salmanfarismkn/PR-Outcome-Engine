@@ -1,11 +1,11 @@
 services:
   postgres:
     image: postgres:17
-    container_name: pr-sentinel-postgres
+    container_name: pr-outcome-engine-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-pr_sentinel}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Compose environment file}
+      POSTGRES_DB: ${POSTGRES_DB:-pr_outcome_engine}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
@@ -23,11 +23,11 @@ services:
 
   pgadmin:
     image: dpage/pgadmin4
-    container_name: pgadminPR
-    restart: 'no'
+    container_name: pgadmin
+    restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?Set PGADMIN_DEFAULT_EMAIL in the Compose environment file}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?Set PGADMIN_DEFAULT_PASSWORD in the Compose environment file}
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
     ports:
       - "127.0.0.1:${PGADMIN_HOST_PORT:-8080}:80"
     volumes:

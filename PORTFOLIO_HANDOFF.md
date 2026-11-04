@@ -1,8 +1,8 @@
-# PR Analyzer portfolio handoff
+# PR Outcome Engine portfolio handoff
 
 ## Purpose
 
-PR Analyzer collects evidence about GitHub pull requests and exposes analysis
+PR Outcome Engine collects evidence about GitHub pull requests and exposes analysis
 and risk-oriented API endpoints. It is intended to make PR history, review
 activity, changed code, CI results, and later outcomes inspectable without
 treating incomplete evidence as a reliable label.
@@ -130,6 +130,19 @@ command history.
    uv run uvicorn app.main:app --reload
    ```
 
+   Automatic webhook recovery is a separately owned process and is disabled
+   by default. In a deployment, run exactly one instance after setting
+   `WEBHOOK_RECOVERY_ENABLED=true`:
+
+   ```powershell
+   $env:WEBHOOK_RECOVERY_ENABLED = "true"
+   uv run python scripts\run_webhook_recovery.py
+   ```
+
+   Do not start the recovery process once per API worker. Its interval,
+   stale threshold, retry limit, and batch size are configured with the
+   `WEBHOOK_RECOVERY_*` settings documented in the runbook.
+
    Visit `http://127.0.0.1:8000/docs` for the API schema. The docs are public;
    business endpoints still require the appropriate bearer credential.
 7. Run checks from `backend/`:
@@ -151,22 +164,21 @@ configured database and prints a read-only JSON report. The evaluator command
 and does not save an artifact. Do not run `POST /ml/train` for a demo audit:
 it writes `artifacts/pr_risk_model.joblib`.
 
-These setup, test, lint, and migration commands are verified against the
-repository's current scripts and configuration. Compose configuration was
-validated without starting or recreating containers. The local setup and
-migration commands above are instructions; they were not run as part of this
-handoff.
+These setup and command examples match the repository's current scripts and
+configuration. Compose configuration and database migrations still require a
+local PostgreSQL environment; the current environment has not executed the
+live PostgreSQL verification steps.
 
 ## Verification and known limitations
 
 The current verified release checks are:
 
-- Backend suite: 75 tests passed.
+- Backend suite: 104 tests passed, 9 PostgreSQL integration tests skipped.
 - `uv run ruff check app scripts tests`: passed.
-- Application import and SQLAlchemy mapper configuration: passed.
+- Recovery and scheduler CLI help: passed.
 - `git diff --check`: passed.
-- Alembic reported revision `c6e2f841a930 (head)` with no metadata drift.
-  Compose configuration validated without service startup.
+- PostgreSQL integration tests: collected but not executed because no
+  dedicated PostgreSQL instance was available.
 
 The suite emits existing Pydantic configuration/deprecation and
 Starlette/httpx deprecation warnings. The effective local `DEBUG` setting was
@@ -181,8 +193,9 @@ The latest readiness audit found 135 eligible examples from one repository:
 repositories. The pipeline is experimental; this dataset does not establish
 model accuracy, generalization, or predictive validity.
 
-Other limitations include shared static API secrets, operator-managed webhook
-redelivery, database dependence for delivery-state recovery, no production
-TLS/secret-management or network policy in Compose, and no demonstrated
-production deployment. The project is suitable only for a controlled,
-supervised portfolio demonstration after explicitly disabling `DEBUG`.
+Other limitations include shared static API secrets, operator-managed
+deployment ownership for the scheduler, database dependence for
+delivery-state recovery, no production TLS/secret-management or network
+policy in Compose, and no demonstrated production deployment. The project
+is suitable only for a controlled, supervised portfolio demonstration after
+explicitly disabling `DEBUG`.

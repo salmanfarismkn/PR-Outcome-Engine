@@ -1,7 +1,13 @@
-# PR-Analyzer
+# PR Outcome Engine
 
-PR Analyzer collects GitHub pull-request evidence and provides API endpoints
+PR Outcome Engine collects GitHub pull-request evidence and provides API endpoints
 for reviewing persisted PR data, analysis, and experimental risk evaluation.
+
+The project is a portfolio-scale backend focused on durable evidence
+collection, conservative outcome labeling, and reliable GitHub webhook
+processing. See [the architecture](docs/architecture.md),
+[engineering decisions](docs/engineering-decisions.md), and the
+[API reference](docs/api.md).
 
 ## Local container setup
 
@@ -34,6 +40,20 @@ network policy. `DEBUG` defaults to false, but a process environment or local
 `.env` can override it. Set `DEBUG=false` explicitly for a demo so SQL
 statements and parameters are not echoed; enable it only for local
 troubleshooting when query logging is appropriate.
+
+Automatic webhook recovery is a separate, disabled-by-default process. Start
+one instance only after migrations are current and database connectivity is
+verified:
+
+```powershell
+cd backend
+$env:WEBHOOK_RECOVERY_ENABLED = "true"
+uv run python scripts\run_webhook_recovery.py
+```
+
+Do not start this process once per API worker. Configure its interval, stale
+threshold, retry limit, and batch size with the `WEBHOOK_RECOVERY_*` settings
+documented in the runbook.
 
 Compose environment variables initialize PostgreSQL and pgAdmin when their
 data volumes are first created; changing passwords in `.env` does not rotate
@@ -98,6 +118,21 @@ identity provider and authorization layer before exposing a production API.
 - docs/
 - scripts/
 - .github/
+
+## Verification status
+
+The current local acceptance run reports **104 tests passed and 9 skipped**.
+Ruff, recovery CLI help, scheduler CLI help, and `git diff --check` pass.
+The nine skipped tests are dedicated PostgreSQL integration tests for
+migrations, concurrent delivery insertion, independent-session persistence,
+and `SKIP LOCKED` claims. They require a live PostgreSQL database configured
+through `PR_OUTCOME_ENGINE_TEST_DATABASE_URL`; they have not been treated as
+successful PostgreSQL verification.
+
+The repository is not claiming production readiness. Shared bearer tokens,
+operator-managed deployment ownership for the scheduler, missing production
+TLS/ingress configuration, and unverified live PostgreSQL behavior remain
+explicit limitations.
 
 ## Outcome labeling and training
 

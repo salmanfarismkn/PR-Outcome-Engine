@@ -7,6 +7,10 @@ from app.outcome.models import PullRequestOutcome
 from app.push.models import PushEvent
 from app.outcome.revert_models import RevertEvent
 from app.feature.models import PRFeatureSnapshot
+from app.commit.models import Commit
+from app.pull_request.models import PullRequest
+from app.repository.models import Repository
+from app.changed_file.models import ChangedFile
 
 __all__ = [
     "Base",
@@ -19,4 +23,8 @@ __all__ = [
     "PushEvent",
     "RevertEvent",
     "PRFeatureSnapshot",
+    "Commit",
+    "PullRequest",
+    "Repository",
+    "ChangedFile",
 ]

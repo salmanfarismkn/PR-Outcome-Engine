@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 import hashlib
 import hmac
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import pytest
 
@@ -15,6 +17,8 @@ from app.main import app
 from app.repository.router import repository_service
 from app.repository.schemas import RepositoryResponse
 from app.webhook import router as webhook_router_module
+from app.health.router import ready
+from sqlalchemy.exc import SQLAlchemyError
 
 
 @pytest.fixture
@@ -152,6 +156,24 @@ def test_health_endpoint_remains_public(client) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+def test_readiness_reports_database_failure() -> None:
+    db = Mock()
+    db.execute.side_effect = SQLAlchemyError("database unavailable")
+
+    with pytest.raises(HTTPException) as exc_info:
+        ready(db)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Database unavailable."
+
+
+def test_readiness_reports_database_available() -> None:
+    db = Mock()
+
+    assert ready(db) == {"status": "ready"}
+    db.execute.assert_called_once()
 
 
 def test_every_business_route_is_documented_as_bearer_protected() -> None:
