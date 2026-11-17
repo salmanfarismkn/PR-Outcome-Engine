@@ -1,4 +1,4 @@
-# PR Analyzer data collection and release runbook
+# PR Outcome Engine data collection and release runbook
 
 This runbook is for collecting **real prospective PR evidence** and deciding
 whether the resulting dataset supports evaluation. Do not backdate snapshots,
@@ -24,6 +24,26 @@ development, `uv run uvicorn app.main:app --reload` serves the API on
 `http://127.0.0.1:8000`.
 Store secrets in the ignored local `.env` file or deployment secret manager;
 never print or commit them. The admin token also grants read access.
+
+Automatic stale recovery is a separate process and is disabled by default.
+This prevents one recovery scheduler from starting in every API worker. Start
+exactly one instance under the deployment process manager after setting
+`WEBHOOK_RECOVERY_ENABLED=true`:
+
+```powershell
+$env:WEBHOOK_RECOVERY_ENABLED = "true"
+uv run python scripts\run_webhook_recovery.py
+```
+
+The scheduler runs one recovery cycle immediately and then repeats every five
+minutes by default. Configure `WEBHOOK_RECOVERY_INTERVAL_SECONDS`,
+`WEBHOOK_RECOVERY_STALE_MINUTES`, `WEBHOOK_RECOVERY_MAX_ATTEMPTS`, and
+`WEBHOOK_RECOVERY_BATCH_LIMIT` in the process environment. Command-line
+options on `run_webhook_recovery.py` override these numeric settings. Stop it
+with Ctrl+C or the process manager's normal stop command; the current cycle
+finishes before shutdown. Database failures are logged and retried on the next
+cycle. The existing `scripts\recover_webhooks.py` command remains dry-run by
+default and is independent of this process.
 
 For local PostgreSQL and pgAdmin containers, copy the root `.env.example` to
 `.env` and set distinct non-empty random URL-safe values for
@@ -137,6 +157,125 @@ FROM webhook_event
 ORDER BY created_at DESC
 LIMIT 50;
 ```
+
+### Operator-controlled stale recovery
+
+The backend includes a dry-run-by-default recovery command for stale
+`received` and `processing` events. The default stale threshold is 15 minutes
+and the default recovery limit is 3 attempts per delivery. Recovery is not a
+scheduler or background worker; run it explicitly from `backend/` after
+checking the dry-run output:
+
+```powershell
+uv run python scripts\recover_webhooks.py
+uv run python scripts\recover_webhooks.py --stale-minutes 30 --limit 25
+uv run python scripts\recover_webhooks.py --execute --stale-minutes 30 --limit 10
+```
+
+`--execute` is required before an event is claimed or dispatched. The command
+prints only event ID, delivery ID, event type, status, age, and attempt count;
+it never prints stored payloads or secrets. PostgreSQL row locks with
+`SKIP LOCKED` prevent two recovery commands from claiming the same event, and
+the claim transaction is committed before handler execution.
+
+Pull-request, review, check-run, and push deliveries are replayed only through
+the existing dispatcher. Their primary records use GitHub IDs or delivery
+uniqueness checks, but replay can still repeat GitHub read calls and derived
+database work. `pending` events remain reserved for the existing
+PR-triggered review replay path. `failed` and exhausted events are not
+automatically retried; inspect them and redeliver from GitHub or resolve them
+manually. A handler failure is returned to `received` until the attempt limit
+is reached, then recorded as `failed`. A recovery command failure leaves the
+claimed event in `processing` or the last durable state; rerun the dry-run
+after resolving the database or handler issue.
+
+To inspect exhausted or failed deliveries without exposing payloads:
+
+```sql
+SELECT id, delivery_id, event_type, status, attempt_count,
+       last_attempt_at, last_error_at, error_message
+FROM webhook_event
+WHERE status = 'failed' OR attempt_count >= 3
+ORDER BY updated_at DESC
+LIMIT 100;
+```
+
+### Health, readiness, and webhook observability
+
+`GET /health` is a liveness check and returns healthy when the application
+process is running. `GET /ready` performs a lightweight database query and
+returns HTTP 503 when the database is unavailable; it does not expose
+connection details.
+
+Recovery command output includes a database-backed status summary for total,
+received, processing, pending, processed, failed, exhausted, eligible, and
+oldest unrecovered events. Application logs include event and delivery IDs,
+status transitions, attempt counts, failure category, and processing duration.
+Payloads, credentials, and tokens are not logged.
+
+Failed events are not automatically requeued. The current CLI supports
+operator-controlled stale recovery only for `received` and `processing`
+events. Requeueing an exhausted or permanently invalid event requires manual
+review and a new explicit operator procedure; the current API does not provide
+an authenticated manual requeue endpoint or individual operator identity
+audit.
+
+## PostgreSQL integration verification
+
+The repository's PostgreSQL integration tests target PostgreSQL 17, matching
+the existing `docker-compose.yml` service. They require a separate database
+and never fall back to the application's development `DATABASE_URL`.
+
+Required environment variable:
+
+- `PR_OUTCOME_ENGINE_TEST_DATABASE_URL` — a `postgresql+psycopg` URL for a dedicated
+  integration database.
+
+The normal application configuration may also require `DATABASE_URL`,
+`GITHUB_WEBHOOK_SECRET`, `API_READ_TOKEN`, and `API_ADMIN_TOKEN`; do not put
+their values in documentation or command history. The integration test
+process uses `PR_OUTCOME_ENGINE_TEST_DATABASE_URL` as its database URL and refuses
+to continue if it is the same as `DATABASE_URL`.
+
+Configure the dedicated database and apply migrations explicitly. The
+commands below do not create, drop, or reset a database:
+
+```powershell
+Set-Location backend
+$env:PR_OUTCOME_ENGINE_TEST_DATABASE_URL = Read-Host "Dedicated PostgreSQL test URL"
+$previousDatabaseUrl = $env:DATABASE_URL
+$env:DATABASE_URL = $env:PR_OUTCOME_ENGINE_TEST_DATABASE_URL
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic heads
+uv run alembic check
+if ($null -eq $previousDatabaseUrl) {
+    Remove-Item Env:DATABASE_URL
+} else {
+    $env:DATABASE_URL = $previousDatabaseUrl
+}
+uv run pytest tests\integration -m postgres -q
+```
+
+Run the full suite separately:
+
+```powershell
+uv run pytest tests -q
+uv run ruff check app tests scripts migrations
+```
+
+The integration suite covers duplicate delivery uniqueness, independent
+sessions, `FOR UPDATE SKIP LOCKED` claims, crash-after-claim recovery,
+attempt-count persistence, handler failures, malformed payloads, and migration
+columns/indexes. The recovery migration preserves existing webhook IDs and
+adds database-generated IDs for new webhook rows. A missing test URL causes
+all nine PostgreSQL tests to be skipped with a prerequisite message; skipped
+tests are not PostgreSQL verification.
+
+Tests use unique delivery IDs and delete only their own rows during cleanup.
+If a test process terminates before cleanup, inspect the dedicated database
+and remove only rows with the `postgres-` delivery prefix after confirming no
+test is running. Never clean the development or production database.
 
 ## 3. Collect evidence through normal PR lifecycle events
 

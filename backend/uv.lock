@@ -617,7 +617,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pr-analyzer-backend"
+name = "pr-outcome-engine-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

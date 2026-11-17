@@ -458,7 +458,7 @@ def generate_one_pr(
     )
 
     with tempfile.TemporaryDirectory(
-        prefix="pr-analyzer-dataset-"
+        prefix="pr-outcome-engine-dataset-"
     ) as temp_dir:
 
         worktree_path = Path(temp_dir) / "repository"

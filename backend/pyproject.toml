@@ -1,7 +1,7 @@
 [project]
-name = "pr-analyzer-backend"
+name = "pr-outcome-engine-backend"
 version = "0.1.0"
-description = "Backend service for PR Analyzer"
+description = "Backend service for PR Outcome Engine"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -31,3 +31,6 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "postgres: requires a dedicated PostgreSQL integration database",
+]

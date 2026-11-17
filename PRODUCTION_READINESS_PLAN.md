@@ -111,73 +111,74 @@ whether a real deployment addresses it.
 
 ### 2. Webhook durability, duplicate delivery, retries, dead letters, and recovery
 
-#### WEB-1 — Processing is synchronous and `processing` has no lease/reaper
+#### WEB-1 — Processing is synchronous; stale recovery has a dedicated scheduler
 - **Current behavior / files:** `backend/app/webhook/router.py` persists the
   delivery and then dispatches it in the request, including GitHub REST calls,
   synchronization, snapshots, and evaluation. Statuses in
   `backend/app/webhook/models.py` include `received`, `processing`, `pending`,
-  `processed`, and `failed`; there is no attempt count, lease expiry,
-  `not_before`, or worker claim. `backend/app/application/webhook_retry.py`
-  only replays pending review deliveries from a later PR lifecycle event.
-- **Status:** Confirmed gap.
-- **Severity / consequence:** **P0 Blocker.** Slow GitHub calls tie up request
-  workers and can exceed webhook response timeouts. A process crash can leave
-  an event permanently `processing`; non-review pending events have no
-  scheduled retry. HTTP 200 for a pending event also prevents GitHub's normal
-  non-2xx retry.
-- **Smallest justified change:** Convert the durable delivery row into a
-  PostgreSQL-backed work item: acknowledge only after a committed enqueue,
-  claim bounded batches atomically (for example with `FOR UPDATE SKIP LOCKED`),
-  record attempt count/lease expiry/next attempt, recover expired claims, and
-  route exhausted or permanent failures to a queryable dead-letter state.
-  Keep the dispatcher and domain services; do not add Redis or another broker
-  before measuring PostgreSQL queue limits.
-- **Acceptance:** A worker crash after claim is recovered after lease expiry;
-  transient failures retry at a bounded backoff; permanent/exhausted events
-  remain inspectable; acknowledgement is sent only after durable enqueue; an
-  event can be manually replayed by an authorized operator.
+  `processed`, and `failed`. `attempt_count`, `last_attempt_at`, and
+  `last_error_at` support bounded operator-controlled stale recovery in
+  `backend/app/application/webhook_recovery.py`, invoked by
+  `backend/scripts/recover_webhooks.py`. `backend/app/application/webhook_retry.py`
+  still replays pending review deliveries from a later PR lifecycle event.
+  `backend/app/application/webhook_recovery_scheduler.py` and
+  `backend/scripts/run_webhook_recovery.py` provide a separately operated,
+  disabled-by-default periodic recovery process.
+- **Status:** Partially addressed; process ownership is operational and there is
+  no distributed scheduler lease.
+- **Severity / consequence:** **P1 High.** Slow GitHub calls tie up request
+  workers and can exceed webhook response timeouts. A process crash can still
+  leave an event `processing` until the scheduler or operator recovery runs;
+  non-review pending events remain outside this recovery command. HTTP 200 for
+  a pending event also prevents GitHub's normal non-2xx retry.
+- **Smallest justified change:** Operate exactly one dedicated scheduler
+  process and monitor its logs. Do not start it once per API worker; do not add
+  a broker without measured throughput or availability evidence.
+- **Acceptance:** The command identifies stale work, requires `--execute`,
+  uses PostgreSQL `FOR UPDATE SKIP LOCKED`, commits claims before dispatch,
+  enforces the attempt limit, and leaves exhausted events queryable.
 - **Dependencies:** DB-1 transaction/idempotency boundaries; WEB-2 duplicate
   claim semantics.
 
-#### WEB-2 — Duplicate delivery lookup and status transitions are not atomic
+#### WEB-2 — Duplicate delivery safety is implemented; live concurrency is unverified
 - **Current behavior / files:** `backend/app/webhook/router.py` checks the
   delivery ID, then creates or updates the row in separate operations.
-  `backend/app/webhook/models.py` has a unique `delivery_id`, but
-  `backend/app/webhook/service.py` does not atomically claim a row or use a
-  status-qualified transition. A duplicate in any state except `processed`
-  may be dispatched concurrently. The insert `IntegrityError` path in
-  `create_event` attempts to refresh the just-created event object after
-  rollback rather than re-querying the winning row.
-- **Status:** Confirmed gap; concurrent impact has not been measured.
-- **Severity / consequence:** **P1 High.** Redelivery races can repeat side
-  effects, collide on unique rows, or fail to recover the already-created
-  event reliably.
-- **Smallest justified change:** Use an atomic insert/upsert or conflict
-  handling that re-reads the existing row, and claim work with a guarded
-  status/lease update in the same transaction. Keep handlers idempotent as a
-  second line of defense.
+  `backend/app/webhook/models.py` has a unique `delivery_id`, and
+  `backend/app/webhook/service.py` rolls back and re-queries the winning row
+  after a delivery uniqueness conflict. The route does not dispatch existing
+  `received` or `processing` rows. The recovery command additionally claims
+  stale rows with PostgreSQL `FOR UPDATE SKIP LOCKED`.
+- **Status:** Partially addressed; live PostgreSQL concurrency remains
+  unverified in this environment.
+- **Severity / consequence:** **P1 High.** The synchronous request path still
+  relies on handler idempotency, and the recovery claim guarantee depends on
+  PostgreSQL behavior and deployment configuration.
+- **Smallest justified change:** Run PostgreSQL concurrency tests and retain
+  the dispatcher/domain uniqueness checks as a second line of defense.
 - **Acceptance:** A PostgreSQL concurrency test submits the same delivery
-  concurrently from multiple clients and proves one active claim, one durable
-  event row, no uncaught integrity error, and convergent domain state.
+  concurrently and proves one active claim, one durable event row, no
+  uncaught integrity error, and convergent domain state.
 - **Dependencies:** WEB-1 and DB-1.
 
-#### WEB-3 — Recovery exists as operator redelivery, not a complete recovery workflow
+#### WEB-3 — Recovery is bounded and operator-controlled
 - **Current behavior / files:** `DATA_COLLECTION_RUNBOOK.md` documents status
   inspection and GitHub Recent Deliveries redelivery; review events can be
   replayed on a PR lifecycle event. There is no authenticated admin replay or
   dead-letter/reprocess interface. `backend/app/application/webhook_retry.py`
   loads all pending review rows for a type and filters them in Python.
-- **Status:** Confirmed gap.
+- **Status:** Partially addressed by
+  `backend/scripts/recover_webhooks.py` and the dedicated scheduler process;
+  no public recovery API exists.
 - **Severity / consequence:** **P1 High.** Operators have no consistent,
   auditable way to retry failed, stale-processing, or non-review pending
   events, and a large pending set can make PR handling inefficient.
-- **Smallest justified change:** Add an admin-only bounded requeue/replay
-  operation after WEB-1, with delivery ID, reason, actor, attempt history, and
-  safeguards against an active lease. Index/filter by repository/PR where
-  known.
-- **Acceptance:** Runbook recovery of one failed, one dependency-pending, and
-  one stale-processing delivery is repeatable and records each attempt without
-  exposing raw payloads.
+- **Smallest justified change:** Keep recovery as a local operator command,
+  with delivery ID, reason, attempt count, and safeguards against active
+  claims. Add an authenticated API only if deployment operations require it.
+- **Acceptance:** Runbook recovery of one stale-processing delivery is
+  repeatable and records each attempt without exposing raw payloads. Pending
+  review replay remains tied to PR lifecycle processing, and failed/exhausted
+  deliveries require manual investigation or GitHub redelivery.
 - **Dependencies:** WEB-1, WEB-2, SEC-2.
 
 ### 3. Database transactions, constraints, concurrency, migrations, backup, and restore
@@ -339,11 +340,12 @@ whether a real deployment addresses it.
 
 #### OPS-1 — Logs are not production-observable and contain ad hoc debug output
 - **Current behavior / files:** `backend/app/core/logging.py` configures basic
-  text logging. Numerous webhook, sync, feature, and outcome modules use
-  `print`; `backend/app/github/client.py` logs review request URLs and debug
-  counts. There is no request/delivery correlation context, metrics, tracing,
-  or alert configuration in tracked infrastructure.
-- **Status:** Confirmed gap.
+  text logging. Webhook lifecycle and recovery logs now include delivery/event
+  identifiers, status transitions, attempts, failure category, and duration
+  without payloads or credentials. Other modules still use `print`, and there
+  is no tracing or alert configuration in tracked infrastructure.
+- **Status:** Partially addressed; webhook observability is improved but
+  application-wide structured logging is still a gap.
 - **Severity / consequence:** **P1 High.** An operator cannot reliably measure
   queue age, failure/retry rates, GitHub latency/rate limits, database errors,
   or end-to-end event delay, and ad hoc logs are difficult to correlate.
@@ -358,11 +360,12 @@ whether a real deployment addresses it.
 - **Dependencies:** WEB-1; hosting/monitoring selection.
 
 #### OPS-2 — Health and readiness checks are too shallow for production
-- **Current behavior / files:** `backend/app/health/router.py` returns a
-  constant `/health` response and `/ready` checks only `SELECT 1`. There is
-  no worker heartbeat/queue readiness, GitHub dependency metric, or alerting
-  policy.
-- **Status:** Confirmed gap; external monitor availability is unverified.
+- **Current behavior / files:** `backend/app/health/router.py` keeps `/health`
+  as a process liveness response. `/ready` performs `SELECT 1` and returns
+  HTTP 503 when the database check fails. There is no worker heartbeat,
+  GitHub dependency metric, or alerting policy.
+- **Status:** Partially addressed; database readiness is explicit, while
+  worker and external dependency monitoring remain unverified.
 - **Severity / consequence:** **P1 High.** The API can report ready while
   webhook work is stuck or a required worker is down; no alert catches
   growing backlog or repeated delivery failures.
@@ -374,6 +377,19 @@ whether a real deployment addresses it.
   injected unavailable DB/worker changes readiness; alert rules are exercised
   with a synthetic backlog/failure signal.
 - **Dependencies:** WEB-1 and OPS-1.
+
+#### OPS-4 — Automatic recovery requires a single owned process
+- **Current behavior / files:** `backend/scripts/run_webhook_recovery.py` runs
+  the existing recovery service in a dedicated periodic process. It is
+  disabled unless `WEBHOOK_RECOVERY_ENABLED=true`; the API process does not
+  start a scheduler.
+- **Status:** Implemented with operator-managed process ownership. The
+  recovery claim uses PostgreSQL row locking, but live PostgreSQL concurrency
+  verification remains outstanding.
+- **Operational requirement:** Run exactly one scheduler instance per
+  deployment. Multiple instances do not share a scheduler lease; they rely on
+  PostgreSQL `SKIP LOCKED` claims to avoid dispatching the same row, which has
+  not been verified against a live PostgreSQL database here.
 
 #### OPS-3 — Existing collection guidance is not an on-call runbook
 - **Current behavior / files:** `DATA_COLLECTION_RUNBOOK.md` explains
@@ -566,7 +582,8 @@ whether a real deployment addresses it.
 
 On the inspected repository evidence alone, **this service is not ready for a
 production deployment**. At minimum, GitHub credential configuration and missing-token behavior must be verified; webhook intake needs durable asynchronous processing, atomic duplicate
-claims, lease recovery, retry/dead-letter handling, and repeatable recovery;
+claims, an operationally scheduled stale-recovery process,
+retry/dead-letter handling, and repeatable recovery;
 data imports must be complete; database transaction/migration and tested
 backup/restore procedures must exist; and the chosen deployment must provide
 TLS/network controls, managed secrets, health/metrics/alerts, CI/security

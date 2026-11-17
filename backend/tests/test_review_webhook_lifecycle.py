@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 import hashlib
 import hmac
+import json
 
 import app.main  # noqa: F401
 import pytest
@@ -398,6 +399,73 @@ async def test_active_duplicate_review_delivery_is_not_dispatched(
 
     assert result == {"status": "in_progress"}
     dispatcher.dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_duplicate_delivery_is_not_dispatched(monkeypatch) -> None:
+    payload = b'{"action":"submitted"}'
+    request = SimpleNamespace(body=AsyncMock(return_value=payload))
+    event = SimpleNamespace(
+        id=11,
+        status="failed",
+        error_message="handler failed",
+        attempt_count=3,
+    )
+    service = Mock()
+    service.verify_signature.return_value = True
+    service.get_event.return_value = event
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+    dispatcher = Mock()
+    monkeypatch.setattr("app.webhook.router.webhook_dispatcher", dispatcher)
+
+    result = await github_webhook(
+        request=request,
+        x_github_event="pull_request_review",
+        x_github_delivery="delivery-failed",
+        x_hub_signature_256="sha256=valid",
+        db=Mock(),
+    )
+
+    assert result == {"status": "failed", "reason": "handler failed"}
+    dispatcher.dispatch.assert_not_called()
+    service.mark_processing.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_malformed_payload_is_failed_and_not_dispatched(monkeypatch) -> None:
+    payload = b"{not-json"
+    request = SimpleNamespace(body=AsyncMock(return_value=payload))
+    event = SimpleNamespace(status="received", error_message=None)
+    service = Mock()
+    service.verify_signature.return_value = True
+    service.get_event.return_value = None
+    service.create_event.return_value = event
+    service.parse_payload.side_effect = json.JSONDecodeError(
+        "invalid",
+        payload.decode(),
+        1,
+    )
+    monkeypatch.setattr("app.webhook.router.webhook_service", service)
+    monkeypatch.setattr(
+        "app.webhook.router.get_settings",
+        lambda: SimpleNamespace(github_webhook_secret="test-secret"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await github_webhook(
+            request=request,
+            x_github_event="pull_request_review",
+            x_github_delivery="delivery-malformed",
+            x_hub_signature_256="sha256=valid",
+            db=Mock(),
+        )
+
+    assert exc_info.value.status_code == 400
+    service.mark_failed.assert_called_once()
 
 
 @pytest.mark.asyncio

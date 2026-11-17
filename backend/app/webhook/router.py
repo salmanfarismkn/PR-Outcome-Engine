@@ -1,5 +1,7 @@
 from http import HTTPStatus
 import logging
+import json
+from time import perf_counter
 
 from fastapi import (
     APIRouter,
@@ -95,6 +97,19 @@ async def github_webhook(
                 "status": "pending",
                 "reason": event.error_message,
             }
+        if event.status == "failed":
+            logger.warning(
+                "Ignoring failed GitHub webhook delivery "
+                "(event=%s, delivery=%s, event_id=%s, attempts=%s)",
+                x_github_event,
+                x_github_delivery,
+                getattr(event, "id", None),
+                getattr(event, "attempt_count", 0),
+            )
+            return {
+                "status": "failed",
+                "reason": event.error_message,
+            }
     else:
         try:
             event = webhook_service.create_event(
@@ -118,15 +133,43 @@ async def github_webhook(
                     "status": "pending",
                     "reason": event.error_message,
                 }
+            if event.status == "failed":
+                return {
+                    "status": "failed",
+                    "reason": event.error_message,
+                }
 
-    data = webhook_service.parse_payload(payload)
+    try:
+        data = webhook_service.parse_payload(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "GitHub webhook payload is malformed "
+            "(event=%s, delivery=%s, event_id=%s, failure_category=payload)",
+            x_github_event,
+            x_github_delivery,
+            getattr(event, "id", None),
+        )
+        webhook_service.mark_failed(
+            db=db,
+            event=event,
+            error_message=f"Malformed webhook payload: {exc}",
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Malformed webhook payload.",
+        ) from exc
 
     logger.info(
         "Starting GitHub webhook processing "
-        "(event=%s, delivery=%s)",
+        "(event=%s, delivery=%s, event_id=%s, previous_status=%s, "
+        "new_status=processing, attempt_count=%s)",
         x_github_event,
         x_github_delivery,
+        getattr(event, "id", None),
+        event.status,
+        getattr(event, "attempt_count", 0) + 1,
     )
+    started_at = perf_counter()
     webhook_service.mark_processing(
         db=db,
         event=event,
@@ -147,9 +190,13 @@ async def github_webhook(
 
         logger.info(
             "GitHub webhook processed successfully "
-            "(event=%s, delivery=%s)",
+            "(event=%s, delivery=%s, event_id=%s, new_status=processed, "
+            "attempt_count=%s, duration_ms=%.1f)",
             x_github_event,
             x_github_delivery,
+            getattr(event, "id", None),
+            getattr(event, "attempt_count", 0),
+            (perf_counter() - started_at) * 1000,
         )
 
     except WebhookDependencyPending as exc:
@@ -161,9 +208,12 @@ async def github_webhook(
 
         logger.warning(
             "GitHub webhook remains pending because a dependency "
-            "is unavailable (event=%s, delivery=%s)",
+            "is unavailable (event=%s, delivery=%s, event_id=%s, "
+            "new_status=pending, duration_ms=%.1f, failure_category=dependency)",
             x_github_event,
             x_github_delivery,
+            getattr(event, "id", None),
+            (perf_counter() - started_at) * 1000,
         )
 
         return {
@@ -174,9 +224,12 @@ async def github_webhook(
     except Exception as exc:
         logger.exception(
             "GitHub webhook processing failed "
-            "(event=%s, delivery=%s)",
+            "(event=%s, delivery=%s, event_id=%s, duration_ms=%.1f, "
+            "failure_category=handler)",
             x_github_event,
             x_github_delivery,
+            getattr(event, "id", None),
+            (perf_counter() - started_at) * 1000,
         )
 
         try:
